@@ -47,6 +47,7 @@ const (
 	KindKeyCreate      = "key.create"
 	KindKeyDestroy     = "key.destroy"
 	KindCheckpoint     = "checkpoint.issue"
+	KindAudit          = "audit.close"
 	KindWebhookSet     = "webhook.set"
 )
 
@@ -298,9 +299,15 @@ const (
 // externally; they are what closes the replay-an-old-store residual the
 // engine cannot close on its own.
 type Checkpoint struct {
-	Register    string         `json:"register"`
-	Version     uint64         `json:"version"`
-	Root        string         `json:"root"`
+	Register string `json:"register"`
+	Version  uint64 `json:"version"`
+	Root     string `json:"root"`
+	// Head is the ledger's lineage-chain head at this version. The head
+	// commits to every root before it, so a checkpoint carrying one
+	// anchors the whole history rather than a single state, and a later
+	// audit can verify the lineage from here and prune everything
+	// earlier. Empty on registers created before the chain existed.
+	Head        string         `json:"head,omitempty"`
 	IssuedAt    int64          `json:"issued_at"`
 	Reason      string         `json:"reason"`
 	ImageDigest string         `json:"image_digest,omitempty"`

@@ -219,13 +219,18 @@ func (r *Register) Import(chunk *ExportChunk) error {
 // Status is the register's health and evidence position, the report
 // §9's observability asks for in one place.
 type Status struct {
-	Name            string                  `json:"name"`
-	Pack            string                  `json:"pack"`
-	PackVersion     string                  `json:"pack_version"`
-	Tenant          string                  `json:"tenant"`
-	ImageDigest     string                  `json:"image_digest,omitempty"`
-	KeySource       string                  `json:"commitment_key_source"`
-	Root            string                  `json:"root"`
+	Name        string `json:"name"`
+	Pack        string `json:"pack"`
+	PackVersion string `json:"pack_version"`
+	Tenant      string `json:"tenant"`
+	ImageDigest string `json:"image_digest,omitempty"`
+	KeySource   string `json:"commitment_key_source"`
+	Root        string `json:"root"`
+	// HistoryChain reports whether this register maintains the lineage
+	// chain. It is fixed when the store is created; a register without
+	// one cannot be audited for lineage, only for state.
+	HistoryChain    bool                    `json:"history_chain"`
+	HistoryHead     string                  `json:"history_head,omitempty"`
 	LedgerVersion   uint64                  `json:"ledger_version"`
 	Transactions    int64                   `json:"transactions"`
 	Objects         int64                   `json:"objects"`
@@ -248,6 +253,8 @@ func (r *Register) Status() (*Status, error) {
 	s.LastCheckpoint = r.LatestCheckpoint()
 	err := r.st.Do(func(tx *store.Tx) error {
 		s.Root, s.LedgerVersion = tx.Root()
+		s.HistoryChain = tx.HistoryEnabled()
+		s.HistoryHead, _, _ = tx.HistoryHead()
 		counts := []struct {
 			stmt string
 			out  *int64

@@ -136,6 +136,29 @@ resulting root with a checkpoint you hold. Restoring without that
 comparison restores a store; restoring with it restores a store you can
 show is the right one.
 
+## Audits
+
+See [auditing.md](auditing.md) for the auditor-facing procedure. The
+operational point is that closing an audit is what physically removes
+superseded and erased content, so **the audit cadence is the erasure
+latency** — it belongs in the data-protection policy alongside the
+backup rotation.
+
+```bash
+curl -H "$AUTH" -X POST https://<register>/api/v1/audit/close \
+  -d '{"from_version":146,"from_head":"2d90…","collect":true,
+       "message":"Quarterly audit"}'
+```
+
+The anchor to verify from is the checkpoint the previous audit produced;
+`{"from_version":0}` audits from genesis. Verification runs before any
+collection, so a failed check leaves the history intact.
+
+`/api/v1/status` reports `history_chain`. A register created before the
+chain existed shows `false` and cannot gain one — the choice is fixed
+when the store is created, so the migration is a new register and a
+replay of state, not an upgrade.
+
 ## Retention
 
 ```bash

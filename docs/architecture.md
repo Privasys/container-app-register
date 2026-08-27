@@ -154,6 +154,30 @@ clear them for personal data). A diff between versions compares
 redacted fields as absent rather than as values, so a timeline never
 leaks what a reader is not cleared to see.
 
+## Lineage
+
+Every commit extends a hash chain over the root sequence, and the chain
+head is written as a reserved leaf, so the live root commits to the head
+and the head commits to every root before it. Rewriting history between
+two anchors and still arriving at the anchored head is a preimage
+attack.
+
+The chain is a create-time choice in the ledger and cannot be added
+later, so a register created before it existed opens without one and
+says so at  rather than refusing to start.
+
+What makes it useful to a third party is that the link function is pure
+and its inputs are not secret. An auditor given two signed anchors and
+the roots between them folds one into the other themselves, with no
+commitment key and no trust in the register. See
+[auditing.md](auditing.md).
+
+This is also what makes erasure finish. Superseded and erased content
+lives in prunable history until an audit vouches for the period and
+collects it; verification has to come first, because pruning destroys
+the root records the check walks. The audit cadence is therefore the
+erasure latency.
+
 ## Evidence
 
 An evidence bundle is a row, its inclusion or absence proof, the root

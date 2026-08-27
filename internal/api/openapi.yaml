@@ -35,6 +35,7 @@ tags:
   - name: History
   - name: Proofs
   - name: Checkpoints
+  - name: Audit
   - name: Retention
   - name: Keys
   - name: Operations
@@ -329,6 +330,88 @@ paths:
       summary: The register's Ed25519 verification key
       responses:
         "200": { description: OK }
+
+  /api/v1/audit/lineage:
+    get:
+      tags: [Audit]
+      summary: The lineage head, with the proof binding it to the live root
+      description: |
+        Every commit extends a hash chain over the root sequence. The
+        head is stored as an ordinary leaf, so the live root commits to
+        it and it commits to every root before it; the proof returned
+        here binds the head to the root rather than asserting it.
+      responses:
+        "200": { description: OK }
+
+  /api/v1/audit/roots:
+    get:
+      tags: [Audit]
+      summary: The recorded roots between two anchors
+      description: |
+        Roots and chain heads are hashes of state, not state. An auditor
+        folds these through the link function between two signed anchors
+        and confirms the result is the head the later one commits to,
+        needing no commitment key and no trust in this answer.
+      parameters:
+        - { name: from, in: query, schema: { type: integer } }
+        - { name: to, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+        "400": { description: The range crosses history an earlier audit collected }
+
+  /api/v1/audit/changes/{version}:
+    get:
+      tags: [Audit]
+      summary: What one commit changed
+      description: |
+        Leaf-level differences: tree position, put or delete, and the
+        size and digest of the value. Positions are keyed hashes, so
+        logical keys are not recoverable from them. Raw values require
+        both the administrative permission and clearance for personal
+        data, because a ledger value is a row and rows carry personal
+        data.
+      parameters:
+        - { name: version, in: path, required: true, schema: { type: integer } }
+        - { name: values, in: query, schema: { type: boolean } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/audit/verify:
+    post:
+      tags: [Audit]
+      summary: Have the register check its own lineage from an anchor
+      description: |
+        The convenient check, not the authoritative one: it is the
+        register vouching for itself. The independent check is to fold
+        the roots between two signed anchors, which register-verify does.
+      responses:
+        "200": { description: The lineage holds }
+
+  /api/v1/audit/close:
+    post:
+      tags: [Audit]
+      summary: Verify the lineage, sign a new anchor, collect what it vouches for
+      description: |
+        Verification runs before any collection: pruning destroys the
+        root records the check walks, so a failed check leaves the
+        history intact. Collection is what physically removes superseded
+        and erased content, which makes the audit cadence the erasure
+        latency. Needs the checkpoint permission and the retention one,
+        because the act both attests and destroys.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from_version: { type: integer, description: The previous anchor; 0 audits from genesis. }
+                from_head: { type: string }
+                collect: { type: boolean }
+                message: { type: string }
+      responses:
+        "200": { description: The audit period is closed }
+        "400": { description: The lineage does not verify; nothing was collected }
 
   /api/v1/retention:
     get:

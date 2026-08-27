@@ -26,6 +26,7 @@ import (
 
 	"github.com/Privasys/container-app-register/internal/checkpoint"
 	"github.com/Privasys/container-app-register/internal/model"
+	"github.com/Privasys/container-app-register/internal/register"
 )
 
 func main() {
@@ -66,6 +67,8 @@ func main() {
 		err = verifyCheckpoint(out, positional[0], *keyRef)
 	case "chain":
 		err = verifyChain(out, positional[0], *keyRef)
+	case "lineage":
+		err = verifyLineage(out, positional[0], *keyRef)
 	default:
 		usage()
 		os.Exit(2)
@@ -83,6 +86,7 @@ func usage() {
   register-verify bundle     <evidence.json>   --key <key> [--checkpoint <cp.json>]
   register-verify checkpoint <checkpoint.json> --key <key>
   register-verify chain      <checkpoints.json> --key <key>
+  register-verify lineage    <lineage.json>     --key <key>
 
 The key is the register's Ed25519 verification key, base64 encoded, either
 inline or in a file. Fetch it once from GET /api/v1/checkpoints/key and keep
@@ -333,4 +337,46 @@ func wrap(text string, width int) string {
 		line += len(word)
 	}
 	return out.String()
+}
+
+// verifyLineage is the check that makes an auditor independent of the
+// register.
+//
+// Given two signed anchors and the roots recorded between them, it
+// folds the roots through the ledger's link function and confirms the
+// result is the head the later anchor commits to. Both anchors are
+// signed, the roots are public, the link function is pure, and no
+// commitment key is involved. A register that rewrote its history
+// between the two anchors cannot produce a root sequence that leads
+// from the first head to the second: doing so is a preimage attack.
+func verifyLineage(out *report, path, keyRef string) error {
+	pub, err := loadKey(keyRef)
+	if err != nil {
+		return err
+	}
+	var doc struct {
+		From  *model.SignedCheckpoint `json:"from"`
+		To    *model.SignedCheckpoint `json:"to"`
+		Roots []string                `json:"roots"`
+	}
+	if err := readJSON(path, &doc); err != nil {
+		return err
+	}
+	if doc.From == nil || doc.To == nil {
+		return fmt.Errorf("%s needs a `from` anchor, a `to` anchor and the `roots` between them", path)
+	}
+
+	out.headline(fmt.Sprintf("Lineage of register %q, versions %d to %d",
+		doc.To.Checkpoint.Register, doc.From.Checkpoint.Version, doc.To.Checkpoint.Version))
+
+	out.check("Earlier anchor", checkpoint.VerifyCheckpoint(pub, doc.From),
+		fmt.Sprintf("genuine, head %s", shorten(doc.From.Checkpoint.Head)))
+	out.check("Later anchor", checkpoint.VerifyCheckpoint(pub, doc.To),
+		fmt.Sprintf("genuine, head %s", shorten(doc.To.Checkpoint.Head)))
+	out.check("Chain", register.VerifyAnchors(&doc.From.Checkpoint, &doc.To.Checkpoint, doc.Roots),
+		fmt.Sprintf("%d recorded roots fold from the earlier head to the later one", len(doc.Roots)))
+
+	out.note("Only the signatures come from the register. The fold is a pure function " +
+		"over public values, so a rewritten history cannot reach the anchored head.")
+	return nil
 }

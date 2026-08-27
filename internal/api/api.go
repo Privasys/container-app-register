@@ -130,6 +130,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/checkpoints/key", s.wrap(s.checkpointKey))
 	mux.HandleFunc("POST /api/v1/checkpoints", s.wrap(s.issueCheckpoint))
 
+	mux.HandleFunc("GET /api/v1/audit/lineage", s.wrap(s.lineage))
+	mux.HandleFunc("GET /api/v1/audit/roots", s.wrap(s.auditRoots))
+	mux.HandleFunc("GET /api/v1/audit/changes/{version}", s.wrap(s.auditChanges))
+	mux.HandleFunc("POST /api/v1/audit/verify", s.wrap(s.auditVerify))
+	mux.HandleFunc("POST /api/v1/audit/close", s.wrap(s.auditClose))
+
 	mux.HandleFunc("GET /api/v1/retention", s.wrap(s.horizons))
 	mux.HandleFunc("POST /api/v1/retention/prune", s.wrap(s.prune))
 	mux.HandleFunc("POST /api/v1/retention/erase", s.wrap(s.erase))

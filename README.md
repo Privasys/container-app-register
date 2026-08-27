@@ -67,6 +67,15 @@ checkpoints are delivered to the customer, and
 [`register-verify`](cmd/register-verify) checks them with nothing but
 the files and a public key — no access to the register at all.
 
+**An auditable lineage, not just a set of states.** Every commit extends
+a hash chain over the root sequence, and the chain head is itself a leaf,
+so the live root commits to the entire history behind it. Each signed
+checkpoint carries that head, which makes it an audit anchor rather than
+a snapshot. Given two anchors and the roots between them — all public —
+an auditor folds one into the other with a pure function and no key at
+all. A register that rewrote its history cannot reach the anchored head:
+doing so is a preimage attack.
+
 **Attested transport.** Caddy terminates RA-TLS in front of the
 service, so a client that verified the certificate has verified a
 hardware quote over the measurement of the build serving it. The
@@ -207,6 +216,9 @@ the page to catch each one, naming which check failed and why.
 | `GET /api/v1/log` | the transaction log |
 | `GET /api/v1/proofs/natural-keys/{class}/{key}` | presence or absence, with proof |
 | `GET /api/v1/checkpoints` | the checkpoint chain |
+| `GET /api/v1/audit/lineage` | the chain head, with the proof binding it to the live root |
+| `GET /api/v1/audit/roots` | the recorded roots between two anchors |
+| `POST /api/v1/audit/close` | verify the lineage, sign a new anchor, collect what it vouches for |
 | `POST /api/v1/retention/prune` | apply a retention policy |
 | `POST /api/v1/retention/erase` | erase a data subject |
 | `GET /api/v1/export` | stream the ledger for backup or a standby |
@@ -250,12 +262,15 @@ curl -H "$AUTH" https://<register>/api/v1/checkpoints/key > register.key
 
 # thereafter, offline
 register-verify bundle evidence.json --key register.key --checkpoint mine.json
-register-verify chain  checkpoints.json --key register.key
+register-verify chain   checkpoints.json --key register.key
+register-verify lineage lineage.json     --key register.key
 ```
 
-`chain` is the check that catches a fork: a register that served two
-different histories has to have signed both, and two checkpoints
-claiming different roots for the same version is proof that it did.
+`chain` catches a fork: a register that served two different histories
+has to have signed both, and two checkpoints claiming different roots for
+one version is proof that it did. `lineage` goes further — it takes two
+anchors and the roots between them and recomputes the chain, so it
+catches a history rewritten *between* two honestly signed anchors.
 
 ## Resilience
 

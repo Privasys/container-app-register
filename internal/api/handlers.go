@@ -581,3 +581,58 @@ func rawJSON(doc []byte) any {
 type jsonRaw []byte
 
 func (j jsonRaw) MarshalJSON() ([]byte, error) { return j, nil }
+
+// -- audit -----------------------------------------------------------------
+
+// The audit surface exists so an auditor does not have to take the
+// register's word for anything. The lineage endpoint hands over the
+// chain head with the proof that binds it to the live root; the roots
+// endpoint hands over the sequence between two anchors. Folding one
+// through the link function and comparing with the other is a check
+// that needs no commitment key and no trust in the answer.
+
+func (s *Server) lineage(req *request) (any, error) {
+	return req.reg.Lineage(req.p)
+}
+
+func (s *Server) auditRoots(req *request) (any, error) {
+	from := uint64(int64Param(req.r, "from"))
+	to := uint64(int64Param(req.r, "to"))
+	return req.reg.Roots(req.p, from, to)
+}
+
+func (s *Server) auditChanges(req *request) (any, error) {
+	version, err := strconv.ParseUint(req.r.PathValue("version"), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("the version must be a whole number")
+	}
+	return req.reg.ChangesAt(req.p, version, boolParam(req.r, "values"))
+}
+
+func (s *Server) auditVerify(req *request) (any, error) {
+	var body struct {
+		FromVersion uint64 `json:"from_version"`
+		FromHead    string `json:"from_head,omitempty"`
+	}
+	if req.r.ContentLength > 0 {
+		if err := decode(req.r, &body); err != nil {
+			return nil, err
+		}
+	}
+	if err := req.reg.VerifyLineage(req.p, body.FromVersion, body.FromHead); err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"verified": true, "from_version": body.FromVersion,
+		"note": "this is the register vouching for itself; the independent check is to fold " +
+			"GET /api/v1/audit/roots through the link function between two signed anchors",
+	}, nil
+}
+
+func (s *Server) auditClose(req *request) (any, error) {
+	var body register.AuditRequest
+	if err := decode(req.r, &body); err != nil {
+		return nil, err
+	}
+	return req.reg.Audit(req.p, body)
+}

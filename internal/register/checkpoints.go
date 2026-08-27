@@ -45,6 +45,7 @@ const (
 	ReasonEvent     = "event"
 	ReasonManual    = "manual"
 	ReasonBootstrap = "bootstrap"
+	ReasonAudit     = "audit"
 )
 
 // checkpointPrefix is the backend keyspace checkpoints live in. It sits
@@ -96,8 +97,14 @@ func (r *Register) issueCheckpoint(tx *store.Tx, reason string) (*model.SignedCh
 	if err != nil {
 		return nil, err
 	}
+	// The chain head turns a checkpoint from a statement about one state
+	// into an anchor for the whole lineage up to it.
+	head, _, err := tx.HistoryHead()
+	if err != nil {
+		return nil, err
+	}
 	cp := model.Checkpoint{
-		Register: r.opts.Name, Version: version, Root: root,
+		Register: r.opts.Name, Version: version, Root: root, Head: head,
 		IssuedAt: r.now(), Reason: reason, ImageDigest: r.opts.ImageDigest,
 		TxSeq: txSeq, Summary: summary,
 	}

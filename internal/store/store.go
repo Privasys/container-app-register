@@ -76,10 +76,19 @@ func Open(dir string, ck [32]byte) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open backend: %w", err)
 	}
-	led, err := ledger.OpenOrCreate(backend, ck)
+	// The history chain is what makes the register auditable: every
+	// commit extends a hash chain over the root sequence, and the chain
+	// head is itself a leaf, so the live root pins the entire lineage.
+	// It is a create-time choice — a store made without it cannot gain
+	// it — so a register created before the chain existed opens without
+	// one and says so at /api/v1/status rather than refusing to start.
+	led, err := ledger.OpenOrCreate(backend, ck, ledger.WithHistoryChain())
 	if err != nil {
-		backend.Close()
-		return nil, fmt.Errorf("store: open ledger: %w", err)
+		led, err = ledger.OpenOrCreate(backend, ck)
+		if err != nil {
+			backend.Close()
+			return nil, fmt.Errorf("store: open ledger: %w", err)
+		}
 	}
 	sqlStore, err := sqlledger.Open(led, backend, DBName)
 	if err != nil {
@@ -175,6 +184,87 @@ func (t *Tx) SQL() *sqlledger.Store { return t.s.sql }
 func (t *Tx) Root() (string, uint64) {
 	root, version := t.s.led.Root()
 	return hex.EncodeToString(root[:]), version
+}
+
+// HistoryEnabled reports whether this store maintains the lineage
+// chain. Stores created before the chain existed do not, and cannot be
+// converted.
+func (t *Tx) HistoryEnabled() bool { return t.s.led.HistoryEnabled() }
+
+// HistoryHead returns the current chain head and the version it covers.
+// Anchoring (root, version, head) together is what lets a later audit
+// verify the lineage back to this point and prune everything before it.
+func (t *Tx) HistoryHead() (string, uint64, error) {
+	if !t.s.led.HistoryEnabled() {
+		return "", 0, nil
+	}
+	head, version, err := t.s.led.HistoryHead()
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(head[:]), version, nil
+}
+
+// VerifyHistory confirms that the recorded root sequence from a
+// previously anchored (version, head) is the unique lineage the live
+// root commits to.
+func (t *Tx) VerifyHistory(fromVersion uint64, fromHead string) error {
+	if !t.s.led.HistoryEnabled() {
+		return fmt.Errorf("store: this register has no lineage chain")
+	}
+	var head [32]byte
+	if fromHead != "" {
+		// An empty head means genesis, whose head is 32 zero bytes.
+		// Auditing from the beginning should not require the caller to
+		// know that.
+		parsed, err := ParseHash(fromHead)
+		if err != nil {
+			return fmt.Errorf("store: anchor head: %w", err)
+		}
+		head = parsed
+	} else if fromVersion != 0 {
+		return fmt.Errorf("store: an anchor at version %d needs its head", fromVersion)
+	}
+	return t.s.led.VerifyHistory(fromVersion, head)
+}
+
+// RootAt returns the root recorded for a historical version. Roots and
+// chain heads are not secret: an auditor recomputes the lineage from
+// them with the pure link function, needing no commitment key.
+func (t *Tx) RootAt(version uint64) (string, error) {
+	root, err := t.s.led.RootAt(version)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(root[:]), nil
+}
+
+// ChangesAt reports what one commit changed, as leaf-level differences.
+// Paths are keyed hashes, so logical keys are not recoverable from
+// them.
+func (t *Tx) ChangesAt(version uint64) ([]ledger.Change, error) {
+	return t.s.led.ChangesAt(version)
+}
+
+// HistoryKeyProof proves the chain head is the value the live root
+// commits to, so an auditor can bind a head to an anchored root without
+// trusting the answer.
+func (t *Tx) HistoryKeyProof() (path [32]byte, proof *ledger.Proof, err error) {
+	return t.Prove(ledger.HistoryKey)
+}
+
+// ParseHash decodes a 32-byte hex hash.
+func ParseHash(encoded string) ([32]byte, error) {
+	var out [32]byte
+	raw, err := hex.DecodeString(encoded)
+	if err != nil {
+		return out, err
+	}
+	if len(raw) != 32 {
+		return out, fmt.Errorf("expected 32 bytes, got %d", len(raw))
+	}
+	copy(out[:], raw)
+	return out, nil
 }
 
 // Exec runs one statement. A data-modifying statement is one atomic
