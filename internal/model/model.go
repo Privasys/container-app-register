@@ -49,6 +49,7 @@ const (
 	KindCheckpoint     = "checkpoint.issue"
 	KindAudit          = "audit.close"
 	KindWebhookSet     = "webhook.set"
+	KindPackSeed       = "pack.seed"
 )
 
 // Ref is a typed link from a transaction to an earlier transaction or
@@ -211,15 +212,20 @@ func DecodeBinary(v any) ([]byte, bool) {
 // Transaction is the full committed record: the envelope, the write
 // set, and where the ledger stood before and after.
 type Transaction struct {
-	Seq           uint64    `json:"seq"`
-	TxID          string    `json:"txid"`
-	Envelope      Envelope  `json:"envelope"`
-	WriteSet      []WriteOp `json:"write_set"`
-	State         string    `json:"state"`
-	RootBefore    string    `json:"root_before"`
-	RootAfter     string    `json:"root_after,omitempty"`
-	VersionBefore uint64    `json:"version_before"`
-	VersionAfter  uint64    `json:"version_after,omitempty"`
+	Seq      uint64    `json:"seq"`
+	TxID     string    `json:"txid"`
+	Envelope Envelope  `json:"envelope"`
+	WriteSet []WriteOp `json:"write_set"`
+	State    string    `json:"state"`
+	// RootBefore is the state the action started from. There is no
+	// RootAfter, and there cannot be: a row cannot carry the root of the
+	// commit that writes it, because the value would be part of the bytes
+	// that root is computed over. An action is one commit, so it produces
+	// VersionBefore + 1, and the root of that version lives in the
+	// ledger's lineage chain where it can be verified.
+	RootBefore    string `json:"root_before"`
+	VersionBefore uint64 `json:"version_before"`
+	VersionAfter  uint64 `json:"version_after,omitempty"`
 }
 
 // Transaction states.
@@ -281,7 +287,11 @@ type Task struct {
 	DecidedAt         int64          `json:"decided_at,omitempty"`
 	DecisionReason    string         `json:"decision_reason,omitempty"`
 	Blockers          []string       `json:"blockers,omitempty"`
-	TxID              string         `json:"txid,omitempty"`
+	// Redacted reports that the proposal's personal data was withheld:
+	// either the reader is not cleared for it, or the proposal has been
+	// decided and its key destroyed.
+	Redacted bool   `json:"redacted,omitempty"`
+	TxID     string `json:"txid,omitempty"`
 }
 
 // Task states.

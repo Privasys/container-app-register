@@ -32,7 +32,6 @@ var baseTables = []tableDDL{
 			created_at BIGINT NOT NULL,
 			state VARCHAR(16) NOT NULL,
 			root_before CHAR(64) NOT NULL,
-			root_after CHAR(64) NOT NULL,
 			version_before BIGINT UNSIGNED NOT NULL,
 			version_after BIGINT UNSIGNED NOT NULL,
 			envelope BLOB NOT NULL,
@@ -110,7 +109,7 @@ var baseTables = []tableDDL{
 			schema_id VARCHAR(128) NOT NULL,
 			created_at BIGINT NOT NULL,
 			status VARCHAR(32) NOT NULL,
-			payload_hash CHAR(64) NOT NULL,
+			payload_hash VARCHAR(96) NOT NULL,
 			payload BLOB NOT NULL,
 			enc_scope VARCHAR(191) NOT NULL,
 			pruned BOOLEAN NOT NULL,
@@ -241,24 +240,10 @@ var baseTables = []tableDDL{
 			url VARCHAR(255) NOT NULL,
 			secret VARBINARY(128) NOT NULL,
 			events VARCHAR(255) NOT NULL,
+			txid CHAR(64) NOT NULL,
 			active BOOLEAN NOT NULL,
 			created_at BIGINT NOT NULL
 		)`,
-	},
-	{
-		name: "webhook_deliveries",
-		ddl: `CREATE TABLE ` + "`webhook_deliveries`" + ` (
-			webhook_id VARCHAR(64) NOT NULL,
-			txid CHAR(64) NOT NULL,
-			status VARCHAR(16) NOT NULL,
-			attempts INT NOT NULL,
-			last_error VARCHAR(255) NOT NULL,
-			updated_at BIGINT NOT NULL,
-			PRIMARY KEY (webhook_id, txid)
-		)`,
-		indexes: []string{
-			"CREATE INDEX `delivery_status` ON `webhook_deliveries` (status, updated_at)",
-		},
 	},
 	{
 		name: "registry",

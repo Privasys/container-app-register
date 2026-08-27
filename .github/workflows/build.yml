@@ -119,10 +119,32 @@ jobs:
           docker exec register-smoke register-verify bundle /tmp/present.json --key /tmp/key.json
           docker exec register-smoke register-verify bundle /tmp/absent.json --key /tmp/key.json
 
-          # The checkpoint chain, and a bundle that has been edited.
+          # The checkpoint chain, with the log checked for removed entries.
           curl -fsS -H "$AUTH" "http://localhost:$PORT/api/v1/checkpoints?limit=100" > /tmp/chain.json
+          curl -fsS -H "$AUTH" "http://localhost:$PORT/api/v1/log?limit=500" > /tmp/log.json
           docker cp /tmp/chain.json register-smoke:/tmp/chain.json
-          docker exec register-smoke register-verify chain /tmp/chain.json --key /tmp/key.json
+          docker cp /tmp/log.json register-smoke:/tmp/log.json
+          docker exec register-smoke register-verify chain /tmp/chain.json             --key /tmp/key.json --log /tmp/log.json
+
+          # Lineage: two anchors and the public roots between them must
+          # fold from one head to the other. This is the check that needs
+          # no key at all, so it is the one an auditor actually runs.
+          FROM=$(jq -r '.checkpoints[-1].checkpoint.version' /tmp/chain.json)
+          FROM_DOC=$(jq -c '.checkpoints[-1]' /tmp/chain.json)
+          curl -fsS -H "$AUTH" -X POST "http://localhost:$PORT/api/v1/workflows/register_lien/propose"             -H 'Content-Type: application/json'             -d "{\"payload\":{\"vehicle_id\":\"$(curl -fsS -H "$AUTH"                  "http://localhost:$PORT/api/v1/records?class=vehicle&q=WVW"                  | jq -r '.records[0].id')\",\"lender\":\"CI Finance\",\"secured_on\":\"2026-02-02\"}}" > /dev/null
+          curl -fsS -H "$AUTH" -X POST "http://localhost:$PORT/api/v1/checkpoints"             -H 'Content-Type: application/json' -d '{"reason":"manual"}' > /tmp/to.json
+          TO=$(jq -r '.checkpoint.version' /tmp/to.json)
+          curl -fsS -H "$AUTH" "http://localhost:$PORT/api/v1/audit/roots?from=$FROM&to=$TO" > /tmp/roots.json
+          jq -n --argjson from "$FROM_DOC" --slurpfile to /tmp/to.json --slurpfile roots /tmp/roots.json             '{from: $from, to: $to[0], roots: $roots[0].roots}' > /tmp/lineage.json
+          docker cp /tmp/lineage.json register-smoke:/tmp/lineage.json
+          docker exec register-smoke register-verify lineage /tmp/lineage.json --key /tmp/key.json
+
+          # A rewritten history must not verify.
+          jq '.roots[0] = "0000000000000000000000000000000000000000000000000000000000000000"'             /tmp/lineage.json > /tmp/lineage-bad.json
+          docker cp /tmp/lineage-bad.json register-smoke:/tmp/lineage-bad.json
+          if docker exec register-smoke register-verify lineage /tmp/lineage-bad.json                --key /tmp/key.json --quiet; then
+            echo "::error::A substituted root verified. The lineage check is not checking."; exit 1
+          fi
 
           sed "s/\"present\":true/\"present\":false/" /tmp/present.json > /tmp/tampered.json
           docker cp /tmp/tampered.json register-smoke:/tmp/tampered.json

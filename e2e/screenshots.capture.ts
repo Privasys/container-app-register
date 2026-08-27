@@ -127,7 +127,7 @@ test.describe('the explorer', () => {
         await page.fill('#log-filters input[name="kind"]', 'record.correct');
         await page.click('#log-filters button[type="submit"]');
         await page.locator('#log-list .entry').first().click();
-        await expect(page.locator('#log-detail')).toContainText('Root after');
+        await expect(page.locator('#log-detail')).toContainText('Root before');
         await shot(page, 'transaction');
     });
 

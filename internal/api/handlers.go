@@ -4,8 +4,6 @@
 package api
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -17,7 +15,6 @@ import (
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/model"
 	"github.com/Privasys/container-app-register/internal/register"
-	"github.com/Privasys/container-app-register/internal/store"
 )
 
 // -- always available ------------------------------------------------------
@@ -402,9 +399,6 @@ func (s *Server) standby(req *request) (any, error) {
 }
 
 func (s *Server) addWebhook(req *request) (any, error) {
-	if !req.p.Can(auth.PermAdmin) {
-		return nil, fmt.Errorf("%s may not manage webhooks", req.p.Acting)
-	}
 	var body struct {
 		ID     string   `json:"id"`
 		URL    string   `json:"url"`
@@ -414,50 +408,31 @@ func (s *Server) addWebhook(req *request) (any, error) {
 	if err := decode(req.r, &body); err != nil {
 		return nil, err
 	}
-	if body.ID == "" || body.URL == "" {
-		return nil, fmt.Errorf("a webhook needs an id and a url")
-	}
-	if !strings.HasPrefix(body.URL, "https://") {
-		return nil, fmt.Errorf("a webhook url must be https")
-	}
-	secret := make([]byte, 32)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, err
-	}
 	active := true
 	if body.Active != nil {
 		active = *body.Active
 	}
-	err := req.reg.Store().Do(func(tx *store.Tx) error {
-		if err := tx.Exec("DELETE FROM `webhooks` WHERE id = " + store.Lit(body.ID)); err != nil {
-			return err
-		}
-		return tx.Exec(store.Insert("webhooks", map[string]any{
-			"id": body.ID, "tenant": req.p.Tenant, "url": body.URL,
-			"secret": secret, "events": strings.Join(body.Events, ","),
-			"active": active, "created_at": time.Now().UTC().Unix(),
-		}))
+	hook, txn, err := req.reg.SetWebhook(req.p, register.Webhook{
+		ID: body.ID, URL: body.URL, Events: body.Events, Active: active,
 	})
 	if err != nil {
 		return nil, err
 	}
 	// The signing secret is shown once, here. The register keeps it to
-	// sign with; it does not serve it again.
-	return map[string]any{
-		"id": body.ID, "url": body.URL, "active": active,
-		"secret": base64.StdEncoding.EncodeToString(secret),
-	}, nil
+	// sign with; it does not serve it again, and it is not in the log.
+	return map[string]any{"webhook": hook, "transaction": txn}, nil
 }
 
 func (s *Server) listWebhooks(req *request) (any, error) {
-	if !req.p.Can(auth.PermAdmin) {
-		return nil, fmt.Errorf("%s may not manage webhooks", req.p.Acting)
-	}
-	rows, err := req.reg.Store().Query("SELECT id, tenant, url, events, active, created_at FROM `webhooks`")
+	hooks, err := req.reg.Webhooks(req.p)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"webhooks": rows}, nil
+	out := map[string]any{"webhooks": hooks}
+	if s.Deliveries != nil {
+		out["deliveries"] = s.Deliveries()
+	}
+	return out, nil
 }
 
 // -- tool endpoints --------------------------------------------------------
@@ -528,7 +503,7 @@ func summarise(entries []*model.Transaction) []map[string]any {
 			"txid": e.TxID, "seq": e.Seq, "kind": e.Envelope.Kind,
 			"author": e.Envelope.Author.Sub, "role": e.Envelope.Author.Role,
 			"at":      time.Unix(e.Envelope.Timestamp, 0).UTC().Format(time.RFC3339),
-			"summary": e.Envelope.Summary(), "root_after": e.RootAfter,
+			"summary": e.Envelope.Summary(), "version": e.VersionAfter,
 		})
 	}
 	return out

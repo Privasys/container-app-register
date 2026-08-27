@@ -38,6 +38,7 @@ func main() {
 	fs := flag.NewFlagSet(command, flag.ExitOnError)
 	keyRef := fs.String("key", "", "the register's verification key: base64, or a file containing it")
 	anchorPath := fs.String("checkpoint", "", "a checkpoint you hold, to anchor a bundle against")
+	logPath := fs.String("log", "", "the transaction log, to check for entries removed from it")
 	quiet := fs.Bool("quiet", false, "print nothing; report the verdict in the exit status")
 
 	// Parse repeatedly so flags may appear on either side of the file
@@ -66,7 +67,7 @@ func main() {
 	case "checkpoint":
 		err = verifyCheckpoint(out, positional[0], *keyRef)
 	case "chain":
-		err = verifyChain(out, positional[0], *keyRef)
+		err = verifyChain(out, positional[0], *keyRef, *logPath)
 	case "lineage":
 		err = verifyLineage(out, positional[0], *keyRef)
 	default:
@@ -85,7 +86,7 @@ func usage() {
 
   register-verify bundle     <evidence.json>   --key <key> [--checkpoint <cp.json>]
   register-verify checkpoint <checkpoint.json> --key <key>
-  register-verify chain      <checkpoints.json> --key <key>
+  register-verify chain      <checkpoints.json> --key <key> [--log <log.json>]
   register-verify lineage    <lineage.json>     --key <key>
 
 The key is the register's Ed25519 verification key, base64 encoded, either
@@ -164,7 +165,7 @@ func verifyCheckpoint(out *report, path, keyRef string) error {
 // strictly increasing, and no two checkpoints claiming different roots
 // for the same version. That last check is the one that catches a fork:
 // a register that served two different histories has to sign both.
-func verifyChain(out *report, path, keyRef string) error {
+func verifyChain(out *report, path, keyRef, logPath string) error {
 	pub, err := loadKey(keyRef)
 	if err != nil {
 		return err
@@ -210,7 +211,108 @@ func verifyChain(out *report, path, keyRef string) error {
 	}
 	first, last := list[0].Checkpoint, list[len(list)-1].Checkpoint
 	out.note(fmt.Sprintf("Covers ledger versions %d to %d.", first.Version, last.Version))
+
+	if logPath != "" {
+		return verifyLogCompleteness(out, logPath, list)
+	}
+	out.note("Pass --log with the transaction log to check that no entry has been " +
+		"removed from it.")
 	return nil
+}
+
+// verifyLogCompleteness checks the transaction log against the signed
+// checkpoints.
+//
+// Proofs establish that the entries an auditor asked about are genuine.
+// They cannot establish that the auditor was shown all of them. This
+// can, without any root chain in the log: sequence numbers are dense, so
+// a removed entry leaves a hole, and renumbering to close the hole
+// changes every later row and therefore the root — which the
+// checkpoints already attest. Each checkpoint also names the highest
+// sequence at its version, so the log cannot be shorter than the
+// signatures say it was.
+func verifyLogCompleteness(out *report, logPath string, anchors []model.SignedCheckpoint) error {
+	var doc struct {
+		Transactions []model.Transaction `json:"transactions"`
+	}
+	if err := readJSON(logPath, &doc); err != nil {
+		if err2 := readJSON(logPath, &doc.Transactions); err2 != nil {
+			return err
+		}
+	}
+	if len(doc.Transactions) == 0 {
+		return fmt.Errorf("no transactions in %s", logPath)
+	}
+	sort.Slice(doc.Transactions, func(i, j int) bool {
+		return doc.Transactions[i].Seq < doc.Transactions[j].Seq
+	})
+
+	var gaps []string
+	seen := map[uint64]bool{}
+	for i, tx := range doc.Transactions {
+		if seen[tx.Seq] {
+			gaps = append(gaps, fmt.Sprintf("sequence %d appears twice", tx.Seq))
+		}
+		seen[tx.Seq] = true
+		if i > 0 {
+			if prev := doc.Transactions[i-1].Seq; tx.Seq != prev+1 {
+				gaps = append(gaps, fmt.Sprintf("%d entries missing between %d and %d",
+					tx.Seq-prev-1, prev, tx.Seq))
+			}
+		}
+		// An action is one commit, so it always produces the next
+		// version. A row claiming otherwise is describing something that
+		// did not happen.
+		if tx.VersionAfter != 0 && tx.VersionAfter != tx.VersionBefore+1 {
+			gaps = append(gaps, fmt.Sprintf("entry %d spans versions %d to %d, not one commit",
+				tx.Seq, tx.VersionBefore, tx.VersionAfter))
+		}
+	}
+	lowest := doc.Transactions[0].Seq
+	highest := doc.Transactions[len(doc.Transactions)-1].Seq
+
+	if len(gaps) == 0 {
+		out.check("Log continuity", nil,
+			fmt.Sprintf("entries %d to %d, none missing", lowest, highest))
+	} else {
+		for _, gap := range gaps {
+			out.check("Log continuity", fmt.Errorf("%s", gap), "")
+		}
+	}
+
+	// Every checkpoint states the highest sequence at its version, and it
+	// is signed, so the log cannot be shorter than any of them.
+	short := 0
+	for _, sc := range anchors {
+		if sc.Checkpoint.TxSeq == 0 {
+			continue
+		}
+		if sc.Checkpoint.TxSeq > highest && sc.Checkpoint.Version <= highestVersion(doc.Transactions) {
+			out.check(fmt.Sprintf("Checkpoint %d", sc.Checkpoint.Version),
+				fmt.Errorf("attests %d entries, the log holds %d",
+					sc.Checkpoint.TxSeq, highest), "")
+			short++
+		}
+	}
+	if short == 0 && lowest == 1 {
+		out.check("Log completeness", nil,
+			"the log is as long as every signed checkpoint says it was")
+	} else if short == 0 {
+		out.unknown("Log completeness",
+			fmt.Sprintf("the log starts at entry %d; earlier entries were collected by an audit "+
+				"and the anchor stands in for them", lowest))
+	}
+	return nil
+}
+
+func highestVersion(txs []model.Transaction) uint64 {
+	var highest uint64
+	for _, tx := range txs {
+		if tx.VersionAfter > highest {
+			highest = tx.VersionAfter
+		}
+	}
+	return highest
 }
 
 // -- reporting -------------------------------------------------------------

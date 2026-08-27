@@ -76,6 +76,7 @@ func run(log *slog.Logger) error {
 	app := &application{cfg: cfg, log: log, material: material, server: server}
 	server.Configure = app.configure
 	server.Standby = app.standbyStatus
+	server.Deliveries = app.deliveries
 
 	if cfg.SelfConfigure {
 		// A register that configures itself is one of two things: a

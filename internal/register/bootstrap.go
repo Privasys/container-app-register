@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Privasys/container-app-register/internal/canon"
 	"github.com/Privasys/container-app-register/internal/model"
@@ -50,7 +51,7 @@ func (r *Register) ensureProjections() error {
 		}
 		for _, class := range r.pk.Classes {
 			ddl, indexes := projectionDDL(class)
-			want := fingerprint(append([]string{ddl}, indexes...))
+			want := fingerprintOf(class)
 			have, err := r.registryValue(tx, "projection:"+class.Name)
 			if err != nil {
 				return err
@@ -74,9 +75,9 @@ func (r *Register) ensureProjections() error {
 			if err := r.repopulateProjection(tx, class); err != nil {
 				return err
 			}
-			if err := r.setRegistryValue(tx, "projection:"+class.Name, want); err != nil {
-				return err
-			}
+			// The fingerprint is recorded by the schema transaction that
+			// follows, not here, so the marker has a transaction to
+			// explain it.
 		}
 		return nil
 	})
@@ -195,14 +196,24 @@ func (r *Register) registerSchema(class *pack.Class) error {
 		id := fmt.Sprintf("%s@%d", class.Name, version)
 		at := r.now()
 
-		ops := []model.WriteOp{{
-			Table: "schemas",
-			Key:   map[string]any{"id": id},
-			Values: map[string]any{
-				"class": class.Name, "version": version, "active": true,
-				"doc": model.Binary(doc), "created_at": at, "txid": model.TxIDPlaceholder,
+		ops := []model.WriteOp{
+			{
+				Table: "schemas",
+				Key:   map[string]any{"id": id},
+				Values: map[string]any{
+					"class": class.Name, "version": version, "active": true,
+					"doc": model.Binary(doc), "created_at": at, "txid": model.TxIDPlaceholder,
+				},
 			},
-		}}
+			// The query table was created just before this ran. Recording
+			// its fingerprint here rather than out of band means the root
+			// movement has a transaction that explains it.
+			{
+				Table:  "registry",
+				Key:    map[string]any{"k": "projection:" + class.Name},
+				Values: map[string]any{"v": model.Binary(fingerprintOf(class)), "updated_at": at},
+			},
+		}
 		if current != nil {
 			ops = append(ops, model.WriteOp{
 				Table:  "schemas",
@@ -213,7 +224,7 @@ func (r *Register) registerSchema(class *pack.Class) error {
 
 		message := fmt.Sprintf("Register schema %s", id)
 		body := fmt.Sprintf("Pack %s %s.\nQuery projection fingerprint %s.",
-			r.pk.Name, r.pk.Version, fingerprintOf(class))
+			r.pk.Name, r.pk.Version, fingerprintOf(class)[:16])
 		env := model.Envelope{
 			Kind: model.KindSchemaRegister, Tenant: r.opts.Tenant, Class: class.Name,
 			SchemaID: id, Author: r.systemAuthor("pack " + r.pk.Name),
@@ -227,9 +238,11 @@ func (r *Register) registerSchema(class *pack.Class) error {
 	})
 }
 
+// fingerprintOf identifies the query table a class's schema produces, so
+// a change to which properties are queryable is visible in the log.
 func fingerprintOf(class *pack.Class) string {
 	ddl, indexes := projectionDDL(class)
-	return fingerprint(append([]string{ddl}, indexes...))[:16]
+	return fingerprint(append([]string{ddl}, indexes...))
 }
 
 // -- retention policies ----------------------------------------------------
@@ -324,7 +337,23 @@ func (r *Register) applySeed() error {
 				refs[seed.Ref] = objectID
 			}
 		}
-		return r.setRegistryValue(tx, marker, r.opts.Now().UTC().Format("2006-01-02T15:04:05Z"))
+		// Record that the seed ran, as a transaction rather than a bare
+		// marker: it moved the root, so something should say why.
+		at := r.now()
+		env := model.Envelope{
+			Kind: model.KindPackSeed, Tenant: r.opts.Tenant,
+			Author: r.systemAuthor("pack " + r.pk.Name), Timestamp: at,
+			Message: composeMessage(
+				clip(fmt.Sprintf("Seed pack %s %s", r.pk.Name, r.pk.Version), model.MaxSummary),
+				fmt.Sprintf("%d demonstration records written once, on a register that held none.",
+					len(r.pk.Seed.Objects))),
+		}
+		_, err = r.commit(tx, env, []model.WriteOp{{
+			Table:  "registry",
+			Key:    map[string]any{"k": marker},
+			Values: map[string]any{"v": model.Binary(r.opts.Now().UTC().Format(time.RFC3339)), "updated_at": at},
+		}})
+		return err
 	})
 }
 
@@ -352,12 +381,4 @@ func (r *Register) registryValue(tx *store.Tx, key string) (string, error) {
 		return "", err
 	}
 	return string(row.Bytes("v")), nil
-}
-
-func (r *Register) setRegistryValue(tx *store.Tx, key, value string) error {
-	return r.applyOne(tx, "", model.WriteOp{
-		Table:  "registry",
-		Key:    map[string]any{"k": key},
-		Values: map[string]any{"v": model.Binary(value), "updated_at": r.now()},
-	})
 }

@@ -97,9 +97,12 @@ async function showTransaction(txid) {
     ['Transaction', tx.txid],
     ['Sequence', String(tx.seq)],
     ['Root before', tx.root_before],
-    ['Root after', tx.root_after],
     ['Ledger version', `${tx.version_before} → ${tx.version_after}`],
   ]));
+  nodes.push(el('p', { class: 'note',
+    text: 'One commit. There is no "root after" here: a row cannot carry the root of '
+        + 'the commit that writes it. The root this produced is in the lineage chain, '
+        + 'under Checkpoints.' }));
 
   if (tx.refs && tx.refs.length) {
     nodes.push(el('h3', { text: 'References' }));
@@ -271,10 +274,29 @@ async function showRecordProof(id, version) {
 async function loadCheckpoints() {
   const key = await api('/api/v1/checkpoints/key');
   state.verificationKey = key.public_key;
-  $('#checkpoint-key').replaceChildren(
-    el('span', {}, 'Verification key ',
+  const header = [
+    el('div', {}, 'Verification key ',
       el('code', { text: key.key_id }), ' (', key.alg, '). ',
-      'Hold this, and the checkpoints below, outside the register.'));
+      'Hold this, and the checkpoints below, outside the register.'),
+  ];
+  try {
+    const lineage = await api('/api/v1/audit/lineage');
+    if (lineage.enabled) {
+      header.push(el('div', {},
+        'Lineage head ', el('code', { text: lineage.head }),
+        ` at version ${lineage.version}. Every commit extends a chain over the root `
+        + 'sequence, and the head is a leaf, so the live root commits to the whole '
+        + 'history behind it. Each checkpoint below carries the head at its version: '
+        + 'fold the roots between two of them and you have verified the lineage yourself.'));
+    } else {
+      header.push(el('div', { class: 'error' },
+        'This register has no lineage chain. It was created before the chain existed, '
+        + 'and the choice cannot be changed after the fact.'));
+    }
+  } catch (err) {
+    header.push(el('div', { class: 'error', text: `Lineage unavailable: ${err.message}` }));
+  }
+  $('#checkpoint-key').replaceChildren(...header);
 
   const data = await api('/api/v1/checkpoints?limit=100');
   const list = $('#checkpoint-list');
@@ -284,7 +306,7 @@ async function loadCheckpoints() {
     list.append(el('div', { class: 'entry' },
       el('span', { class: 'id', text: `v${cp.version}` }),
       el('span', { class: 'summary' }, cp.root,
-        el('span', { class: 'kind', text: cp.reason })),
+        el('span', { class: 'kind', text: cp.head ? `${cp.reason} · anchors lineage` : cp.reason })),
       el('span', { class: 'who', text: fmtTime(cp.issued_at) })));
   }
   setStatus(`${data.count} checkpoints`);

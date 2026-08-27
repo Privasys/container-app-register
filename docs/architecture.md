@@ -89,9 +89,11 @@ commit(envelope, writeSet):
     validate(envelope)                 // refuses a messageless change
     txid = SHA-256(canonical(envelope, writeSet))
     if already committed: return it    // a retry is not a second change
-    record transaction (state=pending, roots before)
-    apply(writeSet)                    // upserts and deletes, by primary key
-    record transaction (state=applied, roots after)
+    BEGIN
+      record transaction (root before, version_before + 1)
+      apply(writeSet)                  // upserts and deletes, by primary key
+    COMMIT                             // one ledger version, one chain link
+    assert the store moved by exactly one
 ```
 
 Three properties fall out of that order.
@@ -101,12 +103,13 @@ whose envelope it does not already contain. An interrupted action is
 visible as a pending transaction carrying its own write set, which is
 enough to finish it.
 
-**Recovery is a replay.** Every write-set entry is an upsert or a
-delete keyed by primary key, so applying one twice lands on the same
-rows. Startup drains pending transactions before anything else runs.
-The one thing this needs is that a write set survives its JSON round
-trip byte for byte, which is why byte columns are tagged rather than
-left as bare base64 strings.
+**There is nothing to recover.** The action is one atomic commit, so a
+crash either committed all of it or none of it. Write-set entries are
+still upserts and deletes keyed by primary key, and startup still drains
+any transaction an older build left pending, but on this build that
+drain finds nothing. The write set survives its JSON round trip byte for
+byte, which is why byte columns are tagged rather than left as bare
+base64 strings.
 
 **Identity is content, not sequence.** The transaction id is the hash
 of the envelope and the effects together, so a retried request is
@@ -116,20 +119,18 @@ substituted into the write set through a placeholder, because a write
 set that contained the literal id would be defining it in terms of
 itself.
 
-### Why an action is several commits
+### Why there is no "root after"
 
-The SQL layer is autocommit-only: each statement is one atomic ledger
-commit. A governance action therefore lands as a short ordered sequence
-— the transaction row, its effects, the mark that it was applied —
-rather than as a single commit, and the ledger version moves several
-times per action. `version_after` on a transaction is the version at
-which its write set is fully applied; the row recording that fact is
-itself committed one version later.
+A row cannot carry the root of the commit that writes it: whatever value
+it holds becomes part of the bytes that root is computed over. This is
+the same circularity that keeps checkpoints out of the tree, and no
+amount of transaction support removes it.
 
-This is the honest description of what the code does. A single-commit
-form would need a batching API in the SQL layer, which does not exist
-yet, and the write-ahead order is what makes the sequence safe in the
-meantime.
+So a transaction records where it started, and nothing about where it
+ended except the version — which is predictable, because an action is
+one commit. The root at that version lives in the lineage chain, where
+it can actually be verified. A field that looks verifiable and is not is
+worse than no field.
 
 ### The one thing outside the log
 
@@ -139,6 +140,13 @@ properties are queryable. Those statements advance the root without a
 transaction of their own. The schema transaction that follows records a
 fingerprint of the structure it produced, so the step is visible in the
 log even though it is not a transaction.
+
+Everything else that once moved the root quietly is now a transaction of
+its own: the marker that a pack's seed ran, the fingerprint of a query
+table, the registration of a subscriber. Webhook *delivery* outcomes
+went the other way and left the ledger entirely — whether somebody
+else's endpoint answered is not a fact about this register, and
+nondeterministic data has no business in an attested tree.
 
 ## Reads
 
@@ -218,6 +226,15 @@ stored payload is `{clear, enc}`; the row also carries the SHA-256 of
 the **whole plaintext** payload. That is what makes erasure clean: the
 commitment is to the hash and the ciphertext, so destroying the key
 changes neither the entry nor anything that ever proved against it.
+
+The same boundary covers the proposal that carried the data in. A
+workflow submission is split and sealed exactly as a record is, under a
+key of its own, and that key is destroyed the moment the proposal is
+decided: from then on the record is the truth, and a second readable
+copy would sit outside the erasure that covers it. The payload
+commitment is keyed too — an unkeyed digest of a name, an address and a
+date of birth is searchable, so one kept past an erasure would preserve
+the personal data in a form that only looks safe.
 
 Each data-encryption key is kept under two wraps: an operational wrap
 under a key derived from the sealed master secret, which is what the

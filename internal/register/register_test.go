@@ -972,8 +972,15 @@ func TestEveryTransactionCarriesAReason(t *testing.T) {
 		if err := e.Envelope.Validate(); err != nil {
 			t.Errorf("transaction %s: %v", e.TxID, err)
 		}
-		if e.RootAfter == "" || e.RootBefore == "" {
+		if e.RootBefore == "" {
 			t.Errorf("transaction %s does not record where the ledger stood", e.TxID)
+		}
+		// An action is one commit, so it always produces the next
+		// version. That is the claim the lineage chain can be checked
+		// against; there is no root-after field to be wrong.
+		if e.VersionAfter != e.VersionBefore+1 {
+			t.Errorf("transaction %s spans versions %d → %d, want one commit",
+				e.TxID, e.VersionBefore, e.VersionAfter)
 		}
 	}
 }
@@ -1022,14 +1029,14 @@ func TestPendingTransactionsAreReplayedOnStart(t *testing.T) {
 	if probe := readRegistry(t, h2, "replay-probe"); probe != "carried out" {
 		t.Fatalf("the pending transaction was not replayed, probe = %q", probe)
 	}
-	rows, err := h2.reg.Store().Query("SELECT state, root_after FROM `transactions` WHERE txid = '" + txid + "'")
+	rows, err := h2.reg.Store().Query("SELECT state, version_after FROM `transactions` WHERE txid = '" + txid + "'")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("read the transaction back: %v", err)
 	}
 	if rows[0].Str("state") != model.TxApplied {
 		t.Errorf("state = %s, want applied", rows[0].Str("state"))
 	}
-	if rows[0].Str("root_after") == "" {
+	if rows[0].Uint("version_after") == 0 {
 		t.Error("the replayed transaction does not record where the ledger ended up")
 	}
 	h2.reg.Store().Close()
@@ -1065,7 +1072,7 @@ func writePendingTransaction(t *testing.T, h *harness, env model.Envelope, ops [
 			"object_id": "", "author_sub": env.Author.Sub,
 			"author_display": env.Author.Display, "author_role": env.Author.Role,
 			"summary": env.Summary(), "created_at": env.Timestamp, "state": model.TxPending,
-			"root_before": root, "root_after": "", "version_before": version,
+			"root_before": root, "version_before": version,
 			"version_after": uint64(0), "envelope": envelope, "write_set": writeSet,
 		}))
 	})

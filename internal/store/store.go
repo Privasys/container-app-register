@@ -164,14 +164,20 @@ func (s *Store) Dir() string { return s.dir }
 func (s *Store) Do(fn func(*Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return fn(&Tx{s: s})
+	// One session for the whole block. A SQL transaction is session
+	// state, so a fresh context per statement would silently discard
+	// BEGIN and commit each statement on its own.
+	return fn(&Tx{s: s, ctx: s.engine.NewContext(context.Background())})
 }
 
-// Tx is exclusive access to the store, handed to a Do callback. It is
-// not a database transaction: the SQL layer is autocommit-only, so each
-// statement run through a Tx is its own atomic ledger commit. What a Tx
-// guarantees is exclusivity and ordering, not rollback.
-type Tx struct{ s *Store }
+// Tx is exclusive access to the store, handed to a Do callback, and one
+// SQL session. Statements run outside Begin are autocommit — one atomic
+// ledger commit each; between Begin and Commit they buffer and land as a
+// single commit, so a governance action occupies exactly one version.
+type Tx struct {
+	s   *Store
+	ctx *gms.Context
+}
 
 // Ledger exposes the authenticated core for proofs, history and
 // pruning.
@@ -267,8 +273,8 @@ func ParseHash(encoded string) ([32]byte, error) {
 	return out, nil
 }
 
-// Exec runs one statement. A data-modifying statement is one atomic
-// ledger commit.
+// Exec runs one statement. Outside a transaction a data-modifying
+// statement is one atomic ledger commit; inside one it buffers.
 func (t *Tx) Exec(stmt string) error {
 	_, err := t.Query(stmt)
 	return err
@@ -277,12 +283,11 @@ func (t *Tx) Exec(stmt string) error {
 // Query runs one statement and materialises its rows as maps keyed by
 // column name, with values normalised to plain Go types.
 func (t *Tx) Query(stmt string) ([]Row, error) {
-	ctx := t.s.engine.NewContext(context.Background())
-	schema, iter, _, err := t.s.engine.Query(ctx, stmt)
+	schema, iter, _, err := t.s.engine.Query(t.ctx, stmt)
 	if err != nil {
 		return nil, fmt.Errorf("sql: %w (%s)", err, truncate(stmt, 240))
 	}
-	rows, err := gms.RowIterToRows(ctx, iter)
+	rows, err := gms.RowIterToRows(t.ctx, iter)
 	if err != nil {
 		return nil, fmt.Errorf("sql: %w (%s)", err, truncate(stmt, 240))
 	}
@@ -298,6 +303,19 @@ func (t *Tx) Query(stmt string) ([]Row, error) {
 	}
 	return out, nil
 }
+
+// Begin opens a SQL transaction on this session. Everything until Commit
+// buffers and lands as one ledger commit, so an action that writes a
+// dozen rows still moves the version once and adds one link to the
+// lineage chain.
+func (t *Tx) Begin() error { return t.Exec("BEGIN") }
+
+// Commit applies the buffered statements as a single atomic commit.
+func (t *Tx) Commit() error { return t.Exec("COMMIT") }
+
+// Rollback discards them. Nothing reached storage, so there is no
+// half-applied state to recover from.
+func (t *Tx) Rollback() error { return t.Exec("ROLLBACK") }
 
 // QueryOne returns the first row, or nil when the result set is empty.
 func (t *Tx) QueryOne(stmt string) (Row, error) {

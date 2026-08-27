@@ -4,12 +4,12 @@
 package register
 
 import (
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/byok"
@@ -57,8 +57,6 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256(plaintext)
-	payloadHash := hex.EncodeToString(sum[:])
 
 	stored := storedPayload{Clear: map[string]any{}}
 	pii := d.class.Compiled().PIIFields()
@@ -74,6 +72,7 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 
 	var ops []model.WriteOp
 	scope := ""
+	payloadHash := PlainHash(plaintext)
 	if d.class.Encryption != pack.EncNone {
 		sealedFields := map[string]any{}
 		for _, f := range pii {
@@ -82,7 +81,11 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 			}
 		}
 		scope = r.dekScope(w.tenant, d.class, d.objectID)
-		dek, keyOps, err := r.ensureDEK(tx, w, d.class, scope)
+		subject := ""
+		if d.class.Encryption == pack.EncSubject {
+			subject = d.objectID
+		}
+		dek, keyOps, err := r.ensureDEK(tx, w, scope, d.class.Encryption, subject)
 		if err != nil {
 			return nil, err
 		}
@@ -96,6 +99,14 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 			return nil, err
 		}
 		stored.Enc = ct
+		// The commitment to the payload is keyed under the same key that
+		// protects it, so destroying the key destroys the ability to test
+		// a guess against the hash as well as the ability to read the
+		// data. An unkeyed digest of a name, an address and a date of
+		// birth is not anonymous: the input space is small enough to
+		// search, so keeping one past an erasure would keep the personal
+		// data in a form that merely looks safe.
+		payloadHash = KeyedHash(dek, plaintext)
 	}
 
 	body, err := canon.Marshal(stored)
@@ -304,9 +315,24 @@ func (r *Register) dekScope(tenant string, class *pack.Class, objectID string) s
 	return ""
 }
 
+// PlainHash commits to a payload that carries no personal data.
+func PlainHash(plaintext []byte) string {
+	sum := sha256.Sum256(plaintext)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// KeyedHash commits to a payload under the key that protects it, so the
+// commitment dies with the key.
+func KeyedHash(dek [32]byte, plaintext []byte) string {
+	mac := hmac.New(sha256.New, dek[:])
+	mac.Write([]byte("register/payload/v1"))
+	mac.Write(plaintext)
+	return "hmac-sha256:" + hex.EncodeToString(mac.Sum(nil))
+}
+
 // ensureDEK returns the data-encryption key for a scope, creating it
 // (and the write ops that record it) when it does not exist yet.
-func (r *Register) ensureDEK(tx *store.Tx, w *writeCtx, class *pack.Class, scope string) ([32]byte, []model.WriteOp, error) {
+func (r *Register) ensureDEK(tx *store.Tx, w *writeCtx, scope, kind, subject string) ([32]byte, []model.WriteOp, error) {
 	var zero [32]byte
 	tenant, at := w.tenant, w.at
 	row, err := tx.QueryOne("SELECT * FROM `dek_keys` WHERE scope = " + store.Lit(scope))
@@ -340,15 +366,11 @@ func (r *Register) ensureDEK(tx *store.Tx, w *writeCtx, class *pack.Class, scope
 		kekID = kek.ID
 	}
 
-	subject := ""
-	if class.Encryption == pack.EncSubject {
-		subject = strings.TrimPrefix(scope, tenant+"/subject/")
-	}
 	op := model.WriteOp{
 		Table: "dek_keys",
 		Key:   map[string]any{"scope": scope},
 		Values: map[string]any{
-			"tenant": tenant, "kind": class.Encryption, "subject": subject,
+			"tenant": tenant, "kind": kind, "subject": subject,
 			"op_wrap": model.Binary(opWrap), "rec_wrap": model.Binary(recWrap), "kek_id": kekID,
 			"created_at": at, "destroyed_at": int64(0), "txid": model.TxIDPlaceholder,
 		},
@@ -438,4 +460,155 @@ type PruneError struct {
 
 func (e *PruneError) Error() string {
 	return fmt.Sprintf("register: %s version %d was pruned per policy %s", e.ObjectID, e.Version, e.Policy)
+}
+
+// -- proposals -------------------------------------------------------------
+//
+// A proposal is the second place a subject's personal data appears, and
+// for a while it was the place erasure forgot. A registration workflow
+// carries the whole record before the record exists, so the task row —
+// and the write set of the transaction that created it — held a name and
+// an address in the clear, which no key destruction touched.
+//
+// The fix is to draw the same boundary in both places: a proposal is
+// split and sealed exactly as a record is, under a key of its own. That
+// key is destroyed the moment the proposal reaches a terminal state,
+// because from then on the record is the truth and the proposal is only
+// a receipt of how it got there.
+
+// taskScope names the key protecting one proposal's personal data.
+func (r *Register) taskScope(tenant, taskID string) string {
+	return tenant + "/task/" + taskID
+}
+
+// sealProposal splits a proposal into the half anyone reviewing it may
+// see and the half that needs a key, using the personal-data
+// annotations of whichever schema governs the payload.
+func (r *Register) sealProposal(tx *store.Tx, w *writeCtx, pii []string, taskID string,
+	payload map[string]any) ([]byte, []model.WriteOp, error) {
+
+	stored := storedPayload{Clear: map[string]any{}}
+	piiSet := map[string]bool{}
+	for _, f := range pii {
+		piiSet[f] = true
+	}
+	for k, v := range payload {
+		if !piiSet[k] {
+			stored.Clear[k] = v
+		}
+	}
+
+	var ops []model.WriteOp
+	if len(pii) > 0 {
+		sealed := map[string]any{}
+		for _, f := range pii {
+			if v, ok := payload[f]; ok {
+				sealed[f] = v
+			}
+		}
+		if len(sealed) > 0 {
+			scope := r.taskScope(w.tenant, taskID)
+			dek, keyOps, err := r.ensureDEK(tx, w, scope, "task", taskID)
+			if err != nil {
+				return nil, nil, err
+			}
+			ops = append(ops, keyOps...)
+			clear, err := canon.Marshal(sealed)
+			if err != nil {
+				return nil, nil, err
+			}
+			ct, err := byok.Encrypt(dek, scope, taskID, 0, clear)
+			if err != nil {
+				return nil, nil, err
+			}
+			stored.Enc = ct
+		}
+	}
+	body, err := canon.Marshal(stored)
+	return body, ops, err
+}
+
+// openProposal merges a proposal's sealed half back in, subject to the
+// caller's clearance. A nil principal is the register itself, acting on
+// the proposal it is about to commit.
+func (r *Register) openProposal(tx *store.Tx, p *auth.Principal, task *model.Task, sealed []byte) error {
+	var stored storedPayload
+	if err := json.Unmarshal(sealed, &stored); err != nil {
+		// Proposals written before they were sealed are plain payloads.
+		return json.Unmarshal(sealed, &task.Payload)
+	}
+	task.Payload = map[string]any{}
+	for k, v := range stored.Clear {
+		task.Payload[k] = v
+	}
+	if stored.Enc == nil {
+		return nil
+	}
+	if p != nil && !p.PII {
+		task.Redacted = true
+		return nil
+	}
+	scope := r.taskScope(task.Tenant, task.ID)
+	row, err := tx.QueryOne("SELECT op_wrap, destroyed_at FROM `dek_keys` WHERE scope = " + store.Lit(scope))
+	if err != nil {
+		return err
+	}
+	if row == nil || row.Int("destroyed_at") != 0 {
+		// The proposal has been decided, so its key is gone. The record
+		// it produced is where the data lives now.
+		task.Redacted = true
+		return nil
+	}
+	dek, err := r.ring.UnwrapOperational(scope, row.Bytes("op_wrap"))
+	if err != nil {
+		return err
+	}
+	clear, err := byok.Decrypt(dek, stored.Enc, task.ID, 0)
+	if err != nil {
+		return fmt.Errorf("register: proposal %s: %w", task.ID, err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(clear, &fields); err != nil {
+		return err
+	}
+	for k, v := range fields {
+		task.Payload[k] = v
+	}
+	return nil
+}
+
+// closeProposal destroys a decided proposal's key. What the proposal
+// said is now either a record or a rejection, and either way the log
+// records the decision; keeping a second readable copy of the personal
+// data would put it outside the reach of the erasure that covers the
+// record.
+func (r *Register) closeProposal(tx *store.Tx, tenant, taskID string, at int64) ([]model.WriteOp, error) {
+	scope := r.taskScope(tenant, taskID)
+	row, err := tx.QueryOne("SELECT destroyed_at FROM `dek_keys` WHERE scope = " + store.Lit(scope))
+	if err != nil {
+		return nil, err
+	}
+	if row == nil || row.Int("destroyed_at") != 0 {
+		// A proposal that carried no personal data has no key to
+		// destroy, and one already decided has none left.
+		return nil, nil
+	}
+	r.ring.Forget(scope)
+	return []model.WriteOp{{
+		Table: "dek_keys",
+		Key:   map[string]any{"scope": scope},
+		Values: map[string]any{
+			"op_wrap": model.Binary(nil), "rec_wrap": model.Binary(nil), "destroyed_at": at,
+		},
+	}}, nil
+}
+
+// proposalPII is the personal-data annotation set governing a
+// proposal's payload: the workflow's own input schema when it declares
+// one, otherwise the class the workflow acts on.
+func (r *Register) proposalPII(wf *pack.Workflow, class *pack.Class) []string {
+	if input := wf.CompiledInput(); input != nil {
+		return input.PIIFields()
+	}
+	return class.Compiled().PIIFields()
 }

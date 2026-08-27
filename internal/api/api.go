@@ -25,6 +25,7 @@ import (
 
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/register"
+	"github.com/Privasys/container-app-register/internal/webhook"
 )
 
 // State is the register's lifecycle position, which the platform's
@@ -60,6 +61,10 @@ type Server struct {
 	Manifest []byte
 	// Standby reports the follower's position, when this register is one.
 	Standby func() map[string]any
+	// Deliveries reports recent webhook outcomes. They are held in
+	// memory rather than in the ledger: whether somebody else's endpoint
+	// answered is not a fact about this register.
+	Deliveries func() []webhook.Delivery
 }
 
 // NewServer builds the HTTP surface in its unconfigured state.

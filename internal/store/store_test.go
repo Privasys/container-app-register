@@ -88,7 +88,7 @@ func TestBlobRoundTripAndAutoIncrement(t *testing.T) {
 			"class": "vehicle", "object_id": "vehicle-1", "author_sub": "sub",
 			"author_display": "A", "author_role": "registrar",
 			"summary": "Registered vehicle", "created_at": int64(10), "state": "pending",
-			"root_before": strings.Repeat("0", 64), "root_after": "",
+			"root_before":    strings.Repeat("0", 64),
 			"version_before": uint64(3), "version_after": uint64(0),
 			"envelope": blob, "write_set": []byte("[]"),
 		})

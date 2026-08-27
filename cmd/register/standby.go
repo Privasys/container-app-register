@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Privasys/container-app-register/internal/register"
+	"github.com/Privasys/container-app-register/internal/webhook"
 )
 
 // The warm standby.
@@ -151,6 +152,15 @@ func (a *application) setStandbyState(state map[string]any) {
 	a.standbyMu.Lock()
 	a.standbyState = state
 	a.standbyMu.Unlock()
+}
+
+// deliveries reports recent webhook outcomes, which live in memory
+// rather than in the ledger.
+func (a *application) deliveries() []webhook.Delivery {
+	if a.hooks == nil {
+		return nil
+	}
+	return a.hooks.Deliveries()
 }
 
 func (a *application) standbyStatus() map[string]any {

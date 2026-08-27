@@ -59,15 +59,21 @@ test.describe('history', () => {
         const detail = page.locator('#log-detail');
         await expect(detail.locator('h2')).not.toBeEmpty();
         await expect(detail).toContainText('Root before');
-        await expect(detail).toContainText('Root after');
         await expect(detail).toContainText('Write set');
+        // There is no "root after", and the page says why rather than
+        // leaving a reader to wonder where it went.
+        await expect(detail).not.toContainText('Root after');
+        await expect(detail).toContainText('cannot carry the root of the commit that writes it');
 
-        // The roots are real 32-byte values, not placeholders: this is
-        // where a reader sees that the change moved the authenticated
-        // state, and from what to what.
+        // The values shown are real 32-byte hashes, not placeholders.
         const hashes = await detail.locator('table .hash').allTextContents();
         const roots = hashes.filter((h) => /^[0-9a-f]{64}$/.test(h));
-        expect(roots.length).toBeGreaterThanOrEqual(3); // transaction id, before, after
+        expect(roots.length).toBeGreaterThanOrEqual(2); // transaction id and root before
+
+        // An action is one commit, so the version always advances by one.
+        const versions = hashes.find((h) => h.includes('→'));
+        const [from, to] = (versions ?? '').split('→').map((n) => Number(n.trim()));
+        expect(to).toBe(from + 1);
     });
 
     test('the log filters by class', async ({ page }) => {
@@ -159,6 +165,9 @@ test.describe('checkpoints', () => {
         await expect(page.locator('#checkpoint-key')).toContainText('Verification key');
         await expect(page.locator('#checkpoint-key')).toContainText('ed25519');
         await expect(page.locator('#checkpoint-key')).toContainText('outside the register');
+        // A checkpoint anchors the lineage, not just one state.
+        await expect(page.locator('#checkpoint-key')).toContainText('Lineage head');
+        await expect(page.locator('#checkpoint-list')).toContainText('anchors lineage');
 
         const entries = page.locator('#checkpoint-list .entry');
         await expect(entries.first()).toBeVisible();

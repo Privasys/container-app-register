@@ -128,13 +128,19 @@ propose ──▶ [counterparty accepts] ──▶ review ──▶ decide
                                             transaction (applied)
 ```
 
-The transaction is written **ahead** of its effects and marked applied
-afterwards, so the ledger never contains an effect whose reason it does
-not already contain. A crash in between leaves a pending transaction,
-which the next start replays; applying a write set twice lands on the
-same rows, so recovery is a replay rather than a repair. Conditions are
-evaluated at proposal and again at decision, because the state a
-decision applies to is the state it is taken in.
+The envelope, the effects and the record that the action completed land
+as **one atomic commit**, so an action occupies exactly one ledger
+version and adds exactly one link to the lineage chain. Either the whole
+action happened or none of it did; there is no half-applied state to
+recover from. Conditions are evaluated at proposal and again at
+decision, because the state a decision applies to is the state it is
+taken in.
+
+There is deliberately no "root after" recorded against a transaction. A
+row cannot carry the root of the commit that writes it: the value would
+be part of the bytes that root is computed over. What a transaction
+records is where it started; the root it produced lives in the lineage
+chain, at version_before + 1.
 
 ## Running it
 
@@ -262,9 +268,14 @@ curl -H "$AUTH" https://<register>/api/v1/checkpoints/key > register.key
 
 # thereafter, offline
 register-verify bundle evidence.json --key register.key --checkpoint mine.json
-register-verify chain   checkpoints.json --key register.key
+register-verify chain   checkpoints.json --key register.key --log log.json
 register-verify lineage lineage.json     --key register.key
 ```
+
+`chain` with `--log` also checks that no entry has been removed from the
+transaction log: sequence numbers are dense, so a hole shows, and
+renumbering to close one changes every later row and therefore the root
+a checkpoint already signed.
 
 `chain` catches a fork: a register that served two different histories
 has to have signed both, and two checkpoints claiming different roots for
@@ -287,10 +298,10 @@ Decisions, rather than gaps.
 
 - **One active register, with a warm standby.** A register has a single
   writer by nature: the log is an order, and an order is easier to keep
-  than to reconstruct. Commits already carry `root_before` and
-  `root_after`, which is the hard part of replication, so scaling out
-  when a deployment needs it is a normal piece of work rather than a
-  redesign.
+  than to reconstruct. An action is already one atomic commit carrying
+  the state it started from, which is the hard part of replication, so
+  scaling out when a deployment needs it is a normal piece of work
+  rather than a redesign.
 - **The core does what the SQL dialect does not.** The embedded engine
   has no foreign keys, column defaults or multi-statement transactions.
   Referential rules, natural-key uniqueness and the ordering of a
@@ -307,12 +318,6 @@ Decisions, rather than gaps.
 
 Worth knowing before relying on any of it.
 
-- **A governance action is a short sequence of commits, not one.** The
-  SQL layer is autocommit-only, so the transaction row, its effects and
-  the mark that it was applied land at successive ledger versions. The
-  write-ahead order makes the sequence safe — the ledger never holds an
-  effect whose reason it does not already hold — but the ideal is one
-  commit, and that needs a batching API the SQL layer does not have.
 - **Creating the catalogue moves the root without a transaction.** Base
   tables and per-class query tables are structure rather than state.
   This happens at bootstrap and when a pack changes which properties

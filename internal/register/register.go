@@ -150,6 +150,7 @@ var pkColumns = map[string][]string{
 	"keks":            {"id"},
 	"dek_keys":        {"scope"},
 	"prune_marks":     {"txid", "idx"},
+	"webhooks":        {"id"},
 	"registry":        {"k"},
 }
 
@@ -191,6 +192,21 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 	}
 
 	rootBefore, versionBefore := tx.Root()
+	// One SQL transaction, so the whole action is one ledger commit: the
+	// transaction row, its effects and the mark that it was applied all
+	// land together at versionBefore + 1. Nothing is half-applied, so
+	// there is no partial state to recover from and exactly one link is
+	// added to the lineage chain.
+	if err := tx.Begin(); err != nil {
+		return nil, fmt.Errorf("register: open transaction: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
 	writeSet, err := canon.Marshal(ops)
 	if err != nil {
 		return nil, err
@@ -209,9 +225,9 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 		"class": env.Class, "object_id": objectID,
 		"author_sub": env.Author.Sub, "author_display": env.Author.Display,
 		"author_role": env.Author.Role, "summary": clip(env.Summary(), 255),
-		"created_at": env.Timestamp, "state": model.TxPending,
-		"root_before": rootBefore, "root_after": "",
-		"version_before": versionBefore, "version_after": uint64(0),
+		"created_at": env.Timestamp, "state": model.TxApplied,
+		"root_before":    rootBefore,
+		"version_before": versionBefore, "version_after": versionBefore + 1,
 		"envelope": envelope, "write_set": writeSet,
 	})); err != nil {
 		return nil, fmt.Errorf("register: record transaction: %w", err)
@@ -221,17 +237,24 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 		return nil, err
 	}
 
-	rootAfter, versionAfter := tx.Root()
-	if err := tx.Exec(store.Update("transactions", map[string]any{
-		"state": model.TxApplied, "root_after": rootAfter, "version_after": versionAfter,
-	}, "txid = "+store.Lit(txid))); err != nil {
-		return nil, fmt.Errorf("register: mark transaction applied: %w", err)
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("register: commit transaction: %w", err)
+	}
+	committed = true
+
+	// The action claimed it would produce versionBefore + 1. If the store
+	// moved by anything else, the claim recorded in the row is wrong, and
+	// a register that files an incorrect account of its own history is
+	// worse than one that fails loudly.
+	if _, actual := tx.Root(); actual != versionBefore+1 {
+		return nil, fmt.Errorf("register: %s moved the ledger %d → %d; an action must be one commit",
+			txid, versionBefore, actual)
 	}
 
 	out := &model.Transaction{
 		TxID: txid, Envelope: env, WriteSet: ops, State: model.TxApplied,
-		RootBefore: rootBefore, RootAfter: rootAfter,
-		VersionBefore: versionBefore, VersionAfter: versionAfter,
+		RootBefore:    rootBefore,
+		VersionBefore: versionBefore, VersionAfter: versionBefore + 1,
 	}
 	if row, err := tx.QueryOne("SELECT seq FROM `transactions` WHERE txid = " + store.Lit(txid)); err == nil && row != nil {
 		out.Seq = row.Uint("seq")
@@ -357,8 +380,13 @@ func substitute(v any, txid string) any {
 	return v
 }
 
-// replayPending finishes any transaction the previous run recorded but
-// did not mark applied.
+// replayPending finishes any transaction left unapplied.
+//
+// A governance action is now one atomic commit, so this can no longer
+// find anything: a crash either committed the whole action or none of
+// it. It is kept because a store written by an earlier build, which
+// wrote the transaction row ahead of its effects, can still contain a
+// pending row, and finishing one is cheap and idempotent.
 func (r *Register) replayPending() error {
 	return r.st.Do(func(tx *store.Tx) error {
 		rows, err := tx.Query("SELECT txid, envelope, write_set FROM `transactions` WHERE state = " +
@@ -379,9 +407,9 @@ func (r *Register) replayPending() error {
 			if err := r.apply(tx, txid, env, ops); err != nil {
 				return fmt.Errorf("register: replay %s: %w", txid, err)
 			}
-			rootAfter, versionAfter := tx.Root()
+			_, versionAfter := tx.Root()
 			if err := tx.Exec(store.Update("transactions", map[string]any{
-				"state": model.TxApplied, "root_after": rootAfter, "version_after": versionAfter,
+				"state": model.TxApplied, "version_after": versionAfter,
 			}, "txid = "+store.Lit(txid))); err != nil {
 				return err
 			}
@@ -401,7 +429,7 @@ func (r *Register) transactionByID(tx *store.Tx, txid string) (*model.Transactio
 func decodeTransaction(row store.Row) (*model.Transaction, error) {
 	out := &model.Transaction{
 		Seq: row.Uint("seq"), TxID: row.Str("txid"), State: row.Str("state"),
-		RootBefore: row.Str("root_before"), RootAfter: row.Str("root_after"),
+		RootBefore:    row.Str("root_before"),
 		VersionBefore: row.Uint("version_before"), VersionAfter: row.Uint("version_after"),
 	}
 	if raw := row.Bytes("envelope"); len(raw) > 0 {

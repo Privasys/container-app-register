@@ -4,9 +4,11 @@
 package register
 
 import (
+	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"strings"
 
 	ledger "github.com/Privasys/immutable-ledger/ledger"
 
@@ -106,6 +108,100 @@ func (r *Register) RecoveryWrap(p *auth.Principal, scope string) (map[string]any
 		return nil
 	})
 	return out, err
+}
+
+// -- subscribers -----------------------------------------------------------
+
+// Webhook is a subscriber the register notifies.
+type Webhook struct {
+	ID      string   `json:"id"`
+	Tenant  string   `json:"tenant"`
+	URL     string   `json:"url"`
+	Events  []string `json:"events,omitempty"`
+	Active  bool     `json:"active"`
+	Created int64    `json:"created_at"`
+	// Secret is returned once, when the subscriber is registered. The
+	// register keeps it to sign with and does not serve it again.
+	Secret string `json:"secret,omitempty"`
+}
+
+// SetWebhook registers or replaces a subscriber.
+//
+// Registration is state, so it is a transaction like any other. The
+// signing secret is not: it is generated here, returned once, and never
+// appears in the write set or the log.
+func (r *Register) SetWebhook(p *auth.Principal, hook Webhook) (*Webhook, *model.Transaction, error) {
+	if !p.Can(auth.PermAdmin) {
+		return nil, nil, fmt.Errorf("%s may not manage subscribers", p.Acting)
+	}
+	if hook.ID == "" || hook.URL == "" {
+		return nil, nil, fmt.Errorf("a subscriber needs an id and a url")
+	}
+	if !strings.HasPrefix(hook.URL, "https://") {
+		return nil, nil, fmt.Errorf("a subscriber url must be https")
+	}
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, nil, err
+	}
+
+	at := r.now()
+	out := &Webhook{
+		ID: hook.ID, Tenant: p.Tenant, URL: hook.URL, Events: hook.Events,
+		Active: hook.Active, Created: at,
+		Secret: base64.StdEncoding.EncodeToString(secret),
+	}
+	var txn *model.Transaction
+	err := r.st.Do(func(tx *store.Tx) error {
+		ops := []model.WriteOp{{
+			Table: "webhooks",
+			Key:   map[string]any{"id": hook.ID},
+			Values: map[string]any{
+				"tenant": p.Tenant, "url": hook.URL, "secret": model.Binary(secret),
+				"events": strings.Join(hook.Events, ","), "active": hook.Active,
+				"created_at": at, "txid": model.TxIDPlaceholder,
+			},
+		}}
+		env := model.Envelope{
+			Kind: model.KindWebhookSet, Tenant: p.Tenant, Author: principalAuthor(p),
+			Timestamp: at,
+			Message: composeMessage(clip(fmt.Sprintf("Register subscriber %s", hook.ID), model.MaxSummary),
+				fmt.Sprintf("Notifications for %s go to %s.\nThe signing secret is generated "+
+					"in the enclave and is not part of this record.",
+					orDefault(strings.Join(hook.Events, ", "), "every event"), hook.URL)),
+		}
+		var err error
+		txn, err = r.commit(tx, env, ops)
+		return err
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, txn, nil
+}
+
+// Webhooks lists the subscribers, without their secrets.
+func (r *Register) Webhooks(p *auth.Principal) ([]Webhook, error) {
+	if !p.Can(auth.PermAdmin) {
+		return nil, fmt.Errorf("%s may not manage subscribers", p.Acting)
+	}
+	rows, err := r.st.Query("SELECT id, tenant, url, events, active, created_at FROM `webhooks` " +
+		"WHERE tenant = " + store.Lit(p.Tenant))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Webhook, 0, len(rows))
+	for _, row := range rows {
+		hook := Webhook{
+			ID: row.Str("id"), Tenant: row.Str("tenant"), URL: row.Str("url"),
+			Active: row.Bool("active"), Created: row.Int("created_at"),
+		}
+		if events := row.Str("events"); events != "" {
+			hook.Events = strings.Split(events, ",")
+		}
+		out = append(out, hook)
+	}
+	return out, nil
 }
 
 // -- export and standby ----------------------------------------------------
@@ -296,12 +392,21 @@ func (r *Register) Tasks(p *auth.Principal, state string, limit int) ([]*model.T
 		return nil, err
 	}
 	out := make([]*model.Task, 0, len(rows))
-	for _, row := range rows {
-		task, err := decodeTask(row)
-		if err != nil {
-			return nil, err
+	err = r.st.Do(func(tx *store.Tx) error {
+		for _, row := range rows {
+			task, err := decodeTask(row)
+			if err != nil {
+				return err
+			}
+			if err := r.openProposal(tx, p, task, row.Bytes("payload")); err != nil {
+				return err
+			}
+			out = append(out, task)
 		}
-		out = append(out, task)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }
@@ -310,7 +415,7 @@ func (r *Register) Tasks(p *auth.Principal, state string, limit int) ([]*model.T
 func (r *Register) Task(p *auth.Principal, id string) (*model.Task, error) {
 	var out *model.Task
 	err := r.st.Do(func(tx *store.Tx) error {
-		task, err := r.taskByID(tx, id)
+		task, err := r.taskByIDAs(tx, p, id)
 		if err != nil {
 			return err
 		}

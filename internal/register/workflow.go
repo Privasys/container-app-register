@@ -146,7 +146,8 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 			state = model.TaskAwaitingCounterparty
 		}
 
-		payloadJSON, err := canon.Marshal(req.Payload)
+		w := newWriteCtx(p.Tenant, at)
+		payloadJSON, keyOps, err := r.sealProposal(tx, w, r.proposalPII(wf, class), taskID, req.Payload)
 		if err != nil {
 			return err
 		}
@@ -159,7 +160,7 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 			summary = "Propose " + displayName(wf)
 		}
 
-		ops := []model.WriteOp{{
+		ops := append(keyOps, model.WriteOp{
 			Table: "tasks",
 			Key:   map[string]any{"id": taskID},
 			Values: map[string]any{
@@ -172,7 +173,7 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 				"decided_by": "", "decided_at": int64(0), "decision_reason": strings.Join(blockers, "; "),
 				"txid": model.TxIDPlaceholder,
 			},
-		}}
+		})
 		env := model.Envelope{
 			Kind: model.KindTaskPropose, Tenant: p.Tenant, Class: class.Name,
 			Author: principalAuthor(p), Timestamp: at,
@@ -246,6 +247,13 @@ func (r *Register) Accept(p *auth.Principal, taskID string, accept bool, reason 
 				"decision_reason": clip(reason, 255),
 			},
 		}}
+		if !accept {
+			closed, err := r.closeProposal(tx, task.Tenant, task.ID, at)
+			if err != nil {
+				return err
+			}
+			ops = append(ops, closed...)
+		}
 		kind := model.KindTaskAccept
 		if !accept {
 			kind = model.KindTaskReject
@@ -347,14 +355,21 @@ func (r *Register) Withdraw(p *auth.Principal, taskID, reason string) (*Outcome,
 			return fmt.Errorf("this proposal is %s and cannot be withdrawn", task.State)
 		}
 		at := r.now()
-		ops := []model.WriteOp{{
-			Table: "tasks",
-			Key:   map[string]any{"id": task.ID},
-			Values: map[string]any{
-				"state": model.TaskWithdrawn, "updated_at": at,
-				"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(reason, 255),
+		ops := []model.WriteOp{
+			{
+				Table: "tasks",
+				Key:   map[string]any{"id": task.ID},
+				Values: map[string]any{
+					"state": model.TaskWithdrawn, "updated_at": at,
+					"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(reason, 255),
+				},
 			},
-		}}
+		}
+		closed, err := r.closeProposal(tx, task.Tenant, task.ID, at)
+		if err != nil {
+			return err
+		}
+		ops = append(ops, closed...)
 		env := model.Envelope{
 			Kind: model.KindTaskWithdraw, Tenant: task.Tenant, Class: task.Class,
 			Author: principalAuthor(p), Timestamp: at,
@@ -384,14 +399,21 @@ func (r *Register) decide(tx *store.Tx, p *auth.Principal, wf *pack.Workflow, ta
 	ctx := r.templateContext(tx, p, task.ID, task.ObjectID, task.Payload)
 
 	if !d.Approve {
-		ops := []model.WriteOp{{
-			Table: "tasks",
-			Key:   map[string]any{"id": task.ID},
-			Values: map[string]any{
-				"state": model.TaskRejected, "updated_at": at,
-				"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(d.Reason, 255),
+		ops := []model.WriteOp{
+			{
+				Table: "tasks",
+				Key:   map[string]any{"id": task.ID},
+				Values: map[string]any{
+					"state": model.TaskRejected, "updated_at": at,
+					"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(d.Reason, 255),
+				},
 			},
-		}}
+		}
+		closed, err := r.closeProposal(tx, task.Tenant, task.ID, at)
+		if err != nil {
+			return nil, nil, err
+		}
+		ops = append(ops, closed...)
 		env := model.Envelope{
 			Kind: model.KindTaskReject, Tenant: task.Tenant, Class: task.Class,
 			Author: principalAuthor(p), Timestamp: at,
@@ -426,14 +448,25 @@ func (r *Register) decide(tx *store.Tx, p *auth.Principal, wf *pack.Workflow, ta
 	}
 	ctx.set("object.id", objectID)
 
-	ops = append(ops, model.WriteOp{
-		Table: "tasks",
-		Key:   map[string]any{"id": task.ID},
-		Values: map[string]any{
-			"state": model.TaskApproved, "object_id": objectID, "updated_at": at,
-			"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(d.Reason, 255),
+	ops = append(ops,
+		model.WriteOp{
+			Table: "tasks",
+			Key:   map[string]any{"id": task.ID},
+			Values: map[string]any{
+				"state": model.TaskApproved, "object_id": objectID, "updated_at": at,
+				"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(d.Reason, 255),
+			},
 		},
-	})
+	)
+	// The record now holds what the proposal proposed, sealed to the
+	// subject. The proposal's own key has no further purpose, and leaving
+	// it would leave personal data outside the reach of the erasure that
+	// covers the record.
+	closed, err := r.closeProposal(tx, task.Tenant, task.ID, at)
+	if err != nil {
+		return nil, nil, err
+	}
+	ops = append(ops, closed...)
 
 	summary := d.Message
 	if summary == "" {
@@ -736,7 +769,14 @@ func validateEvidence(wf *pack.Workflow, evidence map[string]string) error {
 	return nil
 }
 
+// taskByID reads a proposal with its personal data opened for the
+// register itself, which needs the whole payload to commit it.
 func (r *Register) taskByID(tx *store.Tx, id string) (*model.Task, error) {
+	return r.taskByIDAs(tx, nil, id)
+}
+
+// taskByIDAs reads a proposal as a particular caller sees it.
+func (r *Register) taskByIDAs(tx *store.Tx, p *auth.Principal, id string) (*model.Task, error) {
 	row, err := tx.QueryOne("SELECT * FROM `tasks` WHERE id = " + store.Lit(id))
 	if err != nil {
 		return nil, err
@@ -744,7 +784,14 @@ func (r *Register) taskByID(tx *store.Tx, id string) (*model.Task, error) {
 	if row == nil {
 		return nil, fmt.Errorf("no proposal %s", id)
 	}
-	return decodeTask(row)
+	task, err := decodeTask(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.openProposal(tx, p, task, row.Bytes("payload")); err != nil {
+		return nil, err
+	}
+	return task, nil
 }
 
 func decodeTask(row store.Row) (*model.Task, error) {
@@ -756,11 +803,6 @@ func decodeTask(row store.Row) (*model.Task, error) {
 		Message: row.Str("message"), CreatedAt: row.Int("created_at"), UpdatedAt: row.Int("updated_at"),
 		DecidedBy: row.Str("decided_by"), DecidedAt: row.Int("decided_at"),
 		DecisionReason: row.Str("decision_reason"), TxID: row.Str("txid"),
-	}
-	if raw := row.Bytes("payload"); len(raw) > 0 {
-		if err := json.Unmarshal(raw, &t.Payload); err != nil {
-			return nil, fmt.Errorf("register: proposal %s: payload: %w", t.ID, err)
-		}
 	}
 	if raw := row.Bytes("evidence"); len(raw) > 0 {
 		if err := json.Unmarshal(raw, &t.Evidence); err != nil {

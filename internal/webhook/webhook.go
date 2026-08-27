@@ -7,9 +7,15 @@
 // A webhook is a notification, not the record. The ledger is the
 // record, and a subscriber that missed a delivery can always read the
 // transaction log for what it missed. Delivery is therefore
-// best-effort with bounded retries, and only the terminal outcome is
-// written back, so an operator can see what was delivered without the
-// register committing a row for every attempt.
+// best-effort with bounded retries.
+//
+// Outcomes are kept in memory and nowhere else. Whether a subscriber's
+// endpoint answered is not a fact about the register: it depends on
+// somebody else's network, so writing it into the ledger would make the
+// authenticated root a function of the weather. Two registers with
+// identical governance histories would hold different roots, and every
+// audit would have to walk transitions that record nothing about the
+// register at all.
 package webhook
 
 import (
@@ -46,6 +52,9 @@ type Dispatcher struct {
 	wg    sync.WaitGroup
 	once  sync.Once
 	stop  chan struct{}
+
+	mu         sync.RWMutex
+	deliveries []Delivery
 }
 
 type job struct {
@@ -140,7 +149,7 @@ func (d *Dispatcher) deliver(j job) {
 			continue
 		}
 		status, lastErr := d.post(row.Str("url"), row.Bytes("secret"), j)
-		d.record(row.Str("id"), j.id, status, lastErr)
+		d.record(row.Str("id"), j, status, lastErr)
 	}
 }
 
@@ -180,26 +189,45 @@ func (d *Dispatcher) post(url string, secret []byte, j job) (string, string) {
 	return "failed", lastErr
 }
 
-// record writes the terminal outcome of a delivery.
-func (d *Dispatcher) record(webhookID, deliveryID, status, lastErr string) {
-	err := d.st.Do(func(tx *store.Tx) error {
-		where := "webhook_id = " + store.Lit(webhookID) + " AND txid = " + store.Lit(deliveryID)
-		values := map[string]any{
-			"status": status, "attempts": int64(1),
-			"last_error": lastErr, "updated_at": time.Now().UTC().Unix(),
-		}
-		n, err := tx.Count("SELECT COUNT(*) FROM `webhook_deliveries` WHERE " + where)
-		if err != nil {
-			return err
-		}
-		if n > 0 {
-			return tx.Exec(store.Update("webhook_deliveries", values, where))
-		}
-		values["webhook_id"] = webhookID
-		values["txid"] = deliveryID
-		return tx.Exec(store.Insert("webhook_deliveries", values))
-	})
-	if err != nil {
-		d.log.Error("webhook: record delivery", "webhook", webhookID, "error", err)
+// Delivery is the outcome of one attempt to notify one subscriber.
+type Delivery struct {
+	Webhook  string `json:"webhook"`
+	Event    string `json:"event"`
+	ID       string `json:"id"`
+	Status   string `json:"status"`
+	Error    string `json:"error,omitempty"`
+	Finished int64  `json:"finished_at"`
+}
+
+// maxDeliveries is how many outcomes are kept for the operator to look
+// at. Older ones fall off: they are an operational convenience, not a
+// record, and the transaction log is where the record lives.
+const maxDeliveries = 200
+
+// record keeps the terminal outcome in memory.
+func (d *Dispatcher) record(webhookID string, j job, status, lastErr string) {
+	entry := Delivery{
+		Webhook: webhookID, Event: j.event, ID: j.id,
+		Status: status, Error: lastErr, Finished: time.Now().UTC().Unix(),
 	}
+	d.mu.Lock()
+	d.deliveries = append(d.deliveries, entry)
+	if len(d.deliveries) > maxDeliveries {
+		d.deliveries = append([]Delivery(nil), d.deliveries[len(d.deliveries)-maxDeliveries:]...)
+	}
+	d.mu.Unlock()
+	if status != "delivered" {
+		d.log.Warn("webhook delivery failed", "webhook", webhookID, "event", j.event, "error", lastErr)
+	}
+}
+
+// Deliveries returns the recent outcomes, newest first.
+func (d *Dispatcher) Deliveries() []Delivery {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	out := make([]Delivery, 0, len(d.deliveries))
+	for i := len(d.deliveries) - 1; i >= 0; i-- {
+		out = append(out, d.deliveries[i])
+	}
+	return out
 }
