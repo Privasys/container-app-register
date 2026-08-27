@@ -1,0 +1,629 @@
+{
+  "name": "car_register",
+  "title": "National vehicle register",
+  "version": "1.0.0",
+  "description": "A country's register of vehicles, owners, plates, ownership links and liens. It exists to prove the generic core: every mechanism the core offers is exercised by a domain that is familiar enough to argue about.",
+  "tenant": "gov",
+
+  "roles": [
+    {
+      "name": "registrar",
+      "title": "Registrar",
+      "oidc_roles": ["register:registrar"],
+      "permissions": ["read:*", "propose:*", "approve:*", "explorer", "proofs", "checkpoints", "schema"],
+      "pii": true,
+      "incompatible_with": ["clerk"]
+    },
+    {
+      "name": "clerk",
+      "title": "Counter clerk",
+      "oidc_roles": ["register:clerk"],
+      "permissions": [
+        "read:vehicle", "read:plate", "read:ownership", "read:owner",
+        "propose:first_registration", "propose:register_owner",
+        "propose:ownership_transfer", "propose:correction",
+        "propose:scrappage", "propose:export_vehicle"
+      ],
+      "pii": true,
+      "incompatible_with": ["registrar"]
+    },
+    {
+      "name": "police",
+      "title": "Police",
+      "oidc_roles": ["register:police"],
+      "permissions": [
+        "read:vehicle", "read:plate", "read:ownership", "read:owner",
+        "propose:flag_stolen", "approve:flag_stolen", "proofs"
+      ],
+      "pii": true
+    },
+    {
+      "name": "insurer",
+      "title": "Insurer",
+      "oidc_roles": ["register:insurer"],
+      "permissions": ["read:vehicle", "read:plate", "read:lien", "proofs"]
+    },
+    {
+      "name": "auditor",
+      "title": "Auditor",
+      "oidc_roles": ["register:auditor"],
+      "permissions": ["read:*", "explorer", "proofs", "checkpoints"]
+    },
+    {
+      "name": "dpo",
+      "title": "Data protection officer",
+      "oidc_roles": ["register:dpo"],
+      "permissions": ["read:*", "explorer", "retention", "erasure", "keys", "proofs"],
+      "pii": true
+    },
+    {
+      "name": "citizen",
+      "title": "Citizen",
+      "oidc_roles": ["register:citizen"],
+      "permissions": ["read:vehicle", "read:plate", "propose:ownership_transfer"]
+    },
+    {
+      "name": "operator",
+      "title": "Service operator",
+      "oidc_roles": ["register:operator"],
+      "permissions": ["admin", "explorer", "checkpoints", "retention", "proofs", "read:*"]
+    }
+  ],
+
+  "classes": [
+    {
+      "name": "vehicle",
+      "title": "Vehicle",
+      "natural_key": "vin",
+      "statuses": ["registered", "stolen", "exported", "scrapped"],
+      "initial_status": "registered",
+      "encryption": "none",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vin", "make", "model", "year", "colour", "fuel", "first_registration", "plate"],
+        "properties": {
+          "vin": {
+            "type": "string",
+            "title": "Vehicle identification number",
+            "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
+            "x-register": { "queryable": true, "unique": true }
+          },
+          "make": { "type": "string", "maxLength": 48, "x-register": { "queryable": true, "indexed": true } },
+          "model": { "type": "string", "maxLength": 48, "x-register": { "queryable": true } },
+          "year": { "type": "integer", "minimum": 1885, "maximum": 2100, "x-register": { "queryable": true, "indexed": true } },
+          "colour": { "type": "string", "maxLength": 32, "x-register": { "queryable": true } },
+          "fuel": {
+            "type": "string",
+            "enum": ["petrol", "diesel", "electric", "hybrid", "hydrogen", "other"],
+            "x-register": { "queryable": true, "indexed": true }
+          },
+          "engine_cc": { "type": "integer", "minimum": 0, "maximum": 20000 },
+          "first_registration": { "type": "string", "format": "date" },
+          "plate": {
+            "type": "string",
+            "title": "Plate reference",
+            "maxLength": 16,
+            "x-register": { "queryable": true, "unique": true }
+          }
+        }
+      }
+    },
+    {
+      "name": "owner",
+      "title": "Owner",
+      "natural_key": "reference",
+      "statuses": ["active", "closed"],
+      "initial_status": "active",
+      "encryption": "subject",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["reference", "kind", "country", "name"],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "title": "Party reference",
+            "description": "A register-issued reference for the party. Not personal data: it identifies a file, not a person, and it is what an index may hold in the clear.",
+            "pattern": "^[A-Z0-9-]{4,32}$",
+            "x-register": { "queryable": true, "unique": true }
+          },
+          "kind": { "type": "string", "enum": ["person", "company"], "x-register": { "queryable": true, "indexed": true } },
+          "country": { "type": "string", "maxLength": 2, "minLength": 2, "x-register": { "queryable": true } },
+          "name": { "type": "string", "maxLength": 160, "x-register": { "pii": true } },
+          "address": { "type": "string", "maxLength": 320, "x-register": { "pii": true } },
+          "email": { "type": "string", "format": "email", "x-register": { "pii": true } },
+          "telephone": { "type": "string", "maxLength": 40, "x-register": { "pii": true } },
+          "date_of_birth": { "type": "string", "format": "date", "x-register": { "pii": true } }
+        }
+      }
+    },
+    {
+      "name": "plate",
+      "title": "Plate",
+      "natural_key": "number",
+      "statuses": ["issued", "retired"],
+      "initial_status": "issued",
+      "encryption": "none",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["number", "vehicle_id", "issued_on"],
+        "properties": {
+          "number": { "type": "string", "maxLength": 16, "x-register": { "queryable": true, "unique": true } },
+          "vehicle_id": { "type": "string", "x-register": { "queryable": true, "indexed": true, "reference": "vehicle" } },
+          "issued_on": { "type": "string", "format": "date", "x-register": { "queryable": true } },
+          "retired_on": { "type": "string", "x-register": { "queryable": true } }
+        }
+      }
+    },
+    {
+      "name": "ownership",
+      "title": "Ownership",
+      "statuses": ["open", "closed"],
+      "initial_status": "open",
+      "encryption": "none",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vehicle_id", "owner_id", "from_date"],
+        "properties": {
+          "vehicle_id": { "type": "string", "x-register": { "queryable": true, "indexed": true, "reference": "vehicle" } },
+          "owner_id": { "type": "string", "x-register": { "queryable": true, "indexed": true, "reference": "owner" } },
+          "from_date": { "type": "string", "format": "date", "x-register": { "queryable": true, "indexed": true } },
+          "to_date": { "type": "string", "x-register": { "queryable": true } }
+        }
+      }
+    },
+    {
+      "name": "lien",
+      "title": "Lien",
+      "statuses": ["open", "discharged"],
+      "initial_status": "open",
+      "encryption": "none",
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["vehicle_id", "lender", "secured_on"],
+        "properties": {
+          "vehicle_id": { "type": "string", "x-register": { "queryable": true, "indexed": true, "reference": "vehicle" } },
+          "lender": { "type": "string", "maxLength": 160, "x-register": { "queryable": true, "indexed": true } },
+          "reference": { "type": "string", "maxLength": 64 },
+          "amount": { "type": "number", "minimum": 0 },
+          "secured_on": { "type": "string", "format": "date", "x-register": { "queryable": true } },
+          "discharged_on": { "type": "string", "x-register": { "queryable": true } }
+        }
+      }
+    }
+  ],
+
+  "workflows": [
+    {
+      "name": "first_registration",
+      "title": "First registration",
+      "class": "vehicle",
+      "action": "create",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": true,
+      "auto_approve": false,
+      "message": "Register vehicle {{payload.vin}}",
+      "evidence": [
+        { "key": "proof_of_conformity", "title": "Certificate of conformity", "required": true },
+        { "key": "purchase_invoice", "title": "Purchase invoice" }
+      ],
+      "conditions": [
+        {
+          "id": "vin_not_registered",
+          "description": "The VIN must not already be registered",
+          "sql": "SELECT COUNT(*) FROM `q_vehicle` WHERE tenant = {{tenant}} AND vin = {{payload.vin}}",
+          "expect": "zero",
+          "on_fail": "reject",
+          "message": "this VIN is already registered"
+        },
+        {
+          "id": "plate_free",
+          "description": "The plate must not be in use",
+          "sql": "SELECT COUNT(*) FROM `q_plate` WHERE tenant = {{tenant}} AND number = {{payload.plate}} AND status = 'issued'",
+          "expect": "zero",
+          "on_fail": "reject",
+          "message": "this plate is already in use"
+        }
+      ],
+      "effects": [
+        { "type": "record" },
+        {
+          "type": "create_object",
+          "class": "plate",
+          "status": "issued",
+          "payload": {
+            "number": "{{payload.plate}}",
+            "vehicle_id": "{{object.id}}",
+            "issued_on": "{{today}}",
+            "retired_on": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "register_owner",
+      "title": "Register an owner",
+      "class": "owner",
+      "action": "create",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": false,
+      "auto_approve": true,
+      "message": "Register owner {{payload.reference}}",
+      "conditions": [
+        {
+          "id": "reference_free",
+          "description": "The party reference must be unused",
+          "sql": "SELECT COUNT(*) FROM `q_owner` WHERE tenant = {{tenant}} AND reference = {{payload.reference}}",
+          "expect": "zero",
+          "on_fail": "reject",
+          "message": "this party reference is already in use"
+        }
+      ]
+    },
+    {
+      "name": "ownership_transfer",
+      "title": "Ownership transfer",
+      "class": "vehicle",
+      "action": "update",
+      "propose_roles": ["citizen", "clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": true,
+      "auto_approve": true,
+      "message": "Transfer {{object.natural_key}} to {{payload.buyer_reference}}",
+      "counterparty": {
+        "field": "buyer_sub",
+        "prompt": "You are named as the buyer of this vehicle. Accepting records the transfer; declining stops it."
+      },
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["buyer_id", "buyer_sub", "buyer_reference"],
+        "properties": {
+          "buyer_id": { "type": "string", "title": "Buyer's owner record" },
+          "buyer_sub": { "type": "string", "title": "Buyer's identity subject" },
+          "buyer_reference": { "type": "string", "title": "Buyer's party reference" },
+          "price": { "type": "number", "minimum": 0 }
+        }
+      },
+      "conditions": [
+        {
+          "id": "vehicle_registered",
+          "description": "Only a registered vehicle can change hands",
+          "sql": "SELECT COUNT(*) FROM `q_vehicle` WHERE object_id = {{object.id}} AND status = 'registered'",
+          "expect": "nonzero",
+          "on_fail": "reject",
+          "message": "this vehicle is not in the registered state"
+        },
+        {
+          "id": "no_open_lien",
+          "description": "A vehicle under an undischarged lien needs a registrar's decision",
+          "sql": "SELECT COUNT(*) FROM `q_lien` WHERE vehicle_id = {{object.id}} AND status = 'open'",
+          "expect": "zero",
+          "on_fail": "review",
+          "message": "an undischarged lien is recorded against this vehicle"
+        }
+      ],
+      "effects": [
+        {
+          "type": "close_link",
+          "class": "ownership",
+          "status": "closed",
+          "optional": true,
+          "match": { "vehicle_id": "{{object.id}}", "status": "open" },
+          "set": { "to_date": "{{today}}" }
+        },
+        {
+          "type": "open_link",
+          "class": "ownership",
+          "status": "open",
+          "payload": {
+            "vehicle_id": "{{object.id}}",
+            "owner_id": "{{payload.buyer_id}}",
+            "from_date": "{{today}}",
+            "to_date": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "correction",
+      "title": "Correction",
+      "class": "vehicle",
+      "action": "correct",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": true,
+      "auto_approve": false,
+      "message": "Correct {{object.natural_key}}",
+      "evidence": [
+        { "key": "correction_evidence", "title": "Evidence supporting the correction", "required": true }
+      ]
+    },
+    {
+      "name": "flag_stolen",
+      "title": "Flag as stolen",
+      "class": "vehicle",
+      "action": "status",
+      "status": "stolen",
+      "propose_roles": ["police"],
+      "approve_roles": ["police", "registrar"],
+      "independence": false,
+      "auto_approve": true,
+      "message": "Flag {{object.natural_key}} as stolen",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["report_reference"],
+        "properties": {
+          "report_reference": { "type": "string", "maxLength": 64, "title": "Police report reference" },
+          "reported_on": { "type": "string", "format": "date" }
+        }
+      }
+    },
+    {
+      "name": "scrappage",
+      "title": "Scrappage",
+      "class": "vehicle",
+      "action": "status",
+      "status": "scrapped",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": true,
+      "auto_approve": false,
+      "message": "Scrap {{object.natural_key}}",
+      "evidence": [
+        { "key": "certificate_of_destruction", "title": "Certificate of destruction", "required": true }
+      ],
+      "effects": [
+        { "type": "record" },
+        {
+          "type": "close_link",
+          "class": "ownership",
+          "status": "closed",
+          "optional": true,
+          "match": { "vehicle_id": "{{object.id}}", "status": "open" },
+          "set": { "to_date": "{{today}}" }
+        },
+        {
+          "type": "close_link",
+          "class": "plate",
+          "status": "retired",
+          "optional": true,
+          "match": { "vehicle_id": "{{object.id}}", "status": "issued" },
+          "set": { "retired_on": "{{today}}" }
+        }
+      ]
+    },
+    {
+      "name": "export_vehicle",
+      "title": "Export",
+      "class": "vehicle",
+      "action": "status",
+      "status": "exported",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": true,
+      "auto_approve": false,
+      "message": "Export {{object.natural_key}}",
+      "evidence": [
+        { "key": "export_declaration", "title": "Export declaration", "required": true }
+      ],
+      "effects": [
+        { "type": "record" },
+        {
+          "type": "close_link",
+          "class": "plate",
+          "status": "retired",
+          "optional": true,
+          "match": { "vehicle_id": "{{object.id}}", "status": "issued" },
+          "set": { "retired_on": "{{today}}" }
+        }
+      ]
+    },
+    {
+      "name": "register_lien",
+      "title": "Register a lien",
+      "class": "lien",
+      "action": "create",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": false,
+      "auto_approve": true,
+      "message": "Secure a lien over {{payload.vehicle_id}}"
+    },
+    {
+      "name": "discharge_lien",
+      "title": "Discharge a lien",
+      "class": "lien",
+      "action": "status",
+      "status": "discharged",
+      "propose_roles": ["clerk", "registrar"],
+      "approve_roles": ["registrar"],
+      "independence": false,
+      "auto_approve": true,
+      "message": "Discharge the lien on {{object.id}}"
+    }
+  ],
+
+  "queries": [
+    {
+      "name": "vehicles_by_status",
+      "title": "Vehicles by status",
+      "description": "How many vehicles are in each state.",
+      "roles": ["registrar", "auditor", "operator", "dpo", "police"],
+      "sql": "SELECT status, COUNT(*) AS vehicles FROM `q_vehicle` WHERE tenant = {{tenant}} GROUP BY status ORDER BY status"
+    },
+    {
+      "name": "transfers_since",
+      "title": "Transfers since a date",
+      "description": "Ownership links opened on or after a date, with the vehicle they concern.",
+      "roles": ["registrar", "auditor", "operator", "police"],
+      "params": [
+        { "name": "since", "title": "From date", "type": "string", "required": true, "default": "2026-01-01" }
+      ],
+      "sql": "SELECT v.vin, v.make, v.model, o.owner_id, o.from_date FROM `q_ownership` AS o JOIN `q_vehicle` AS v ON v.object_id = o.vehicle_id WHERE o.from_date >= {{param.since}} ORDER BY o.from_date DESC LIMIT 200"
+    },
+    {
+      "name": "vehicles_by_make_and_year",
+      "title": "Vehicles by make and year",
+      "roles": ["registrar", "auditor", "operator", "insurer", "police"],
+      "params": [
+        { "name": "make", "title": "Make", "type": "string", "required": true },
+        { "name": "from_year", "title": "From year", "type": "integer", "required": false, "default": "0" }
+      ],
+      "sql": "SELECT object_id, vin, make, model, `year`, colour, status FROM `q_vehicle` WHERE tenant = {{tenant}} AND make = {{param.make}} AND `year` >= {{param.from_year}} ORDER BY `year` DESC LIMIT 200"
+    },
+    {
+      "name": "vehicles_ever_owned_by",
+      "title": "Vehicles ever owned by a party",
+      "description": "The history walk: every vehicle this owner has held, open links and closed ones alike.",
+      "roles": ["registrar", "auditor", "operator", "police", "dpo"],
+      "params": [
+        { "name": "owner_id", "title": "Owner record", "type": "string", "required": true }
+      ],
+      "sql": "SELECT v.vin, v.make, v.model, o.from_date, o.to_date, o.status FROM `q_ownership` AS o JOIN `q_vehicle` AS v ON v.object_id = o.vehicle_id WHERE o.owner_id = {{param.owner_id}} ORDER BY o.from_date"
+    },
+    {
+      "name": "open_liens",
+      "title": "Open liens",
+      "roles": ["registrar", "auditor", "operator", "insurer"],
+      "sql": "SELECT l.object_id, v.vin, l.lender, l.secured_on FROM `q_lien` AS l JOIN `q_vehicle` AS v ON v.object_id = l.vehicle_id WHERE l.status = 'open' ORDER BY l.secured_on DESC LIMIT 200"
+    },
+    {
+      "name": "stolen_vehicles",
+      "title": "Vehicles flagged stolen",
+      "roles": ["registrar", "auditor", "operator", "police", "insurer"],
+      "sql": "SELECT object_id, vin, make, model, colour, updated_at FROM `q_vehicle` WHERE tenant = {{tenant}} AND status = 'stolen' ORDER BY updated_at DESC LIMIT 200"
+    }
+  ],
+
+  "retention": [
+    {
+      "id": "P01",
+      "title": "Owner personal data",
+      "class": "owner",
+      "window_days": 3650,
+      "scope": "pii",
+      "erasure": true
+    },
+    {
+      "id": "P02",
+      "title": "Superseded vehicle versions",
+      "class": "vehicle",
+      "window_days": 3650,
+      "scope": "all"
+    },
+    {
+      "id": "P03",
+      "title": "Closed ownership links",
+      "class": "ownership",
+      "window_days": 3650,
+      "scope": "all"
+    }
+  ],
+
+  "seed": {
+    "message": "Demonstration content shipped with the pack",
+    "objects": [
+      {
+        "class": "owner",
+        "ref": "alice",
+        "message": "Seed owner PTY-0001",
+        "payload": {
+          "reference": "PTY-0001",
+          "kind": "person",
+          "country": "FR",
+          "name": "SPECIMEN, Alice",
+          "address": "12 rue de l'Exemple, 75001 Paris",
+          "email": "alice@example.invalid",
+          "date_of_birth": "1984-03-11"
+        }
+      },
+      {
+        "class": "owner",
+        "ref": "bruno",
+        "message": "Seed owner PTY-0002",
+        "payload": {
+          "reference": "PTY-0002",
+          "kind": "person",
+          "country": "FR",
+          "name": "SPECIMEN, Bruno",
+          "address": "5 avenue Fictive, 69002 Lyon",
+          "email": "bruno@example.invalid",
+          "date_of_birth": "1979-11-02"
+        }
+      },
+      {
+        "class": "owner",
+        "ref": "fleetco",
+        "message": "Seed owner PTY-0003",
+        "payload": {
+          "reference": "PTY-0003",
+          "kind": "company",
+          "country": "FR",
+          "name": "Fleetco Specimen SARL",
+          "address": "Zone Fictive 3, 33000 Bordeaux",
+          "email": "fleet@example.invalid"
+        }
+      },
+      {
+        "class": "vehicle",
+        "ref": "car1",
+        "message": "Seed vehicle WVWZZZ1JZXW000001",
+        "payload": {
+          "vin": "WVWZZZ1JZXW000001",
+          "make": "Volkswagen",
+          "model": "Golf",
+          "year": 2019,
+          "colour": "blue",
+          "fuel": "petrol",
+          "engine_cc": 1498,
+          "first_registration": "2019-04-02",
+          "plate": "AA-123-AA"
+        }
+      },
+      {
+        "class": "vehicle",
+        "ref": "car2",
+        "message": "Seed vehicle VF1RFB00X66000002",
+        "payload": {
+          "vin": "VF1RFB00X66000002",
+          "make": "Renault",
+          "model": "Zoe",
+          "year": 2022,
+          "colour": "white",
+          "fuel": "electric",
+          "engine_cc": 0,
+          "first_registration": "2022-09-15",
+          "plate": "BB-456-BB"
+        }
+      },
+      {
+        "class": "plate",
+        "message": "Seed plate AA-123-AA",
+        "payload": { "number": "AA-123-AA", "vehicle_id": "@car1", "issued_on": "2019-04-02", "retired_on": "" }
+      },
+      {
+        "class": "plate",
+        "message": "Seed plate BB-456-BB",
+        "payload": { "number": "BB-456-BB", "vehicle_id": "@car2", "issued_on": "2022-09-15", "retired_on": "" }
+      },
+      {
+        "class": "ownership",
+        "message": "Seed ownership of WVWZZZ1JZXW000001",
+        "payload": { "vehicle_id": "@car1", "owner_id": "@alice", "from_date": "2019-04-02", "to_date": "" }
+      },
+      {
+        "class": "ownership",
+        "message": "Seed ownership of VF1RFB00X66000002",
+        "payload": { "vehicle_id": "@car2", "owner_id": "@fleetco", "from_date": "2022-09-15", "to_date": "" }
+      }
+    ]
+  }
+}

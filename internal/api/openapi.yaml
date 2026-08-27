@@ -1,0 +1,496 @@
+openapi: 3.1.0
+info:
+  title: Privasys Register
+  version: "1.0"
+  license:
+    name: AGPL-3.0-only
+    identifier: AGPL-3.0-only
+  description: |
+    A schema-driven, tamper-evident register of records, running as a
+    confidential container on Privasys `enclave-os-virtual`.
+
+    Every state-changing call is a transaction: a commit envelope saying
+    who, when, why and about what, plus the effects. Both are committed
+    to an authenticated key-value store whose 32-byte root attests the
+    whole database, so any row can be returned with a proof that
+    verifies offline against a signed root checkpoint.
+
+    Transport is RA-TLS: the certificate carries a hardware attestation
+    quote committing to the measurement of the build serving the
+    request. Callers authenticate with a Privasys ID bearer token; the
+    register maps the token's roles onto the roles its pack declares.
+
+servers:
+  - url: https://{register}.apps.privasys.org
+    variables:
+      register:
+        default: register
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Records
+  - name: Workflows
+  - name: History
+  - name: Proofs
+  - name: Checkpoints
+  - name: Retention
+  - name: Keys
+  - name: Operations
+
+paths:
+  /health:
+    get:
+      tags: [Operations]
+      security: []
+      summary: Readiness probe
+      responses:
+        "200":
+          description: The service is up. `state` is `awaiting_configuration` until the deployer configures it.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                  state: { type: string, enum: [awaiting_configuration, ready, failed] }
+
+  /configure:
+    post:
+      tags: [Operations]
+      security: []
+      summary: Configure the register (owner or admin only, enforced by the platform)
+      description: |
+        The platform's freeze gate keeps every other path at HTTP 503
+        until this call answers 2xx, and re-arms it on every restart.
+        The configuration carries the tenant, the schema pack and,
+        optionally, the ledger commitment key, so the key that binds the
+        register's whole state arrives over an attested channel and is
+        held only in memory.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Configuration" }
+      responses:
+        "200": { description: Configured; the gate lifts }
+        "400": { description: Refused }
+
+  /api/v1/status:
+    get:
+      tags: [Operations]
+      summary: Service position — root, version, counts, last checkpoint
+      responses:
+        "200": { description: OK }
+
+  /api/v1/pack:
+    get:
+      tags: [Operations]
+      summary: What this register holds, who may do what, and which queries exist
+      responses:
+        "200": { description: OK }
+
+  /api/v1/records:
+    get:
+      tags: [Records]
+      summary: List records of a class
+      parameters:
+        - { name: class, in: query, required: true, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: q, in: query, description: Natural-key prefix, schema: { type: string } }
+        - { name: order, in: query, schema: { type: string } }
+        - { name: desc, in: query, schema: { type: boolean } }
+        - { name: limit, in: query, schema: { type: integer, default: 50, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+        "403": { description: The acting role may not read this class }
+
+  /api/v1/records/{id}:
+    get:
+      tags: [Records]
+      summary: One record's current version
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not registered }
+
+  /api/v1/records/{id}/versions/{version}:
+    get:
+      tags: [Records]
+      summary: One historical version
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+        "410":
+          description: The content was pruned under a retention policy. The version and its place in history remain.
+
+  /api/v1/records/{id}/history:
+    get:
+      tags: [Records, History]
+      summary: A record's timeline, with the transaction behind each version
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/workflows/{name}/propose:
+    post:
+      tags: [Workflows]
+      summary: Start a workflow
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Proposal" }
+      responses:
+        "200": { description: Proposed, and decided under policy when the workflow permits it }
+        "403": { description: The acting role may not propose this }
+
+  /api/v1/tasks:
+    get:
+      tags: [Workflows]
+      summary: List proposals
+      parameters:
+        - { name: state, in: query, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/tasks/{id}:
+    get:
+      tags: [Workflows]
+      summary: One proposal, with any conditions currently blocking it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/tasks/{id}/accept:
+    post:
+      tags: [Workflows]
+      summary: The counterparty's answer on a two-party workflow
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accept: { type: boolean }
+                reason: { type: string }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/tasks/{id}/decide:
+    post:
+      tags: [Workflows]
+      summary: Approve or reject a proposal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve: { type: boolean }
+                reason: { type: string }
+                message: { type: string, description: Commit summary, 72 characters }
+                body: { type: string }
+                refs: { type: array, items: { $ref: "#/components/schemas/Ref" } }
+      responses:
+        "200": { description: Decided }
+        "403": { description: Not an approving role, or the proposer under separation of duties }
+
+  /api/v1/tasks/{id}/withdraw:
+    post:
+      tags: [Workflows]
+      summary: Withdraw your own proposal
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Withdrawn }
+
+  /api/v1/log:
+    get:
+      tags: [History]
+      summary: The transaction log, newest first
+      parameters:
+        - { name: class, in: query, schema: { type: string } }
+        - { name: object_id, in: query, schema: { type: string } }
+        - { name: author, in: query, schema: { type: string } }
+        - { name: role, in: query, schema: { type: string } }
+        - { name: kind, in: query, schema: { type: string } }
+        - { name: ref_type, in: query, schema: { type: string } }
+        - { name: target, in: query, schema: { type: string } }
+        - { name: from, in: query, schema: { type: integer } }
+        - { name: to, in: query, schema: { type: integer } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/log/{txid}:
+    get:
+      tags: [History]
+      summary: One transaction — envelope, write set, roots before and after
+      parameters:
+        - { name: txid, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/queries:
+    get:
+      tags: [Records]
+      summary: The saved queries this pack declares
+      responses:
+        "200": { description: OK }
+
+  /api/v1/queries/{name}:
+    post:
+      tags: [Records]
+      summary: Run a saved query
+      description: |
+        The register accepts no SQL from callers. It runs the queries its
+        pack declared, with typed parameters substituted as literals.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params: { type: object, additionalProperties: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/proofs/records/{id}/{version}:
+    get:
+      tags: [Proofs]
+      summary: A signed evidence bundle for one record version
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: version, in: path, required: true, schema: { type: integer } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidenceBundle" }
+          description: OK
+
+  /api/v1/proofs/natural-keys/{class}/{key}:
+    get:
+      tags: [Proofs]
+      summary: Prove that a natural key is, or is not, registered
+      description: |
+        An absent key comes back with an absence proof, not with silence:
+        "this vehicle was never registered here" is a statement the
+        register can prove.
+      parameters:
+        - { name: class, in: path, required: true, schema: { type: string } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EvidenceBundle" }
+          description: OK
+
+  /api/v1/checkpoints:
+    get:
+      tags: [Checkpoints]
+      summary: The checkpoint chain, newest first
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Checkpoints]
+      summary: Issue a checkpoint now
+      responses:
+        "200": { description: Issued }
+
+  /api/v1/checkpoints/latest:
+    get:
+      tags: [Checkpoints]
+      summary: The most recent signed checkpoint
+      responses:
+        "200": { description: OK }
+
+  /api/v1/checkpoints/key:
+    get:
+      tags: [Checkpoints]
+      summary: The register's Ed25519 verification key
+      responses:
+        "200": { description: OK }
+
+  /api/v1/retention:
+    get:
+      tags: [Retention]
+      summary: Per-policy horizon report
+      responses:
+        "200": { description: OK }
+
+  /api/v1/retention/prune:
+    post:
+      tags: [Retention]
+      summary: Apply a retention policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy_id]
+              properties:
+                policy_id: { type: string }
+                object_id: { type: string }
+                message: { type: string }
+                dry_run: { type: boolean }
+                collect_history: { type: boolean }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/retention/erase:
+    post:
+      tags: [Retention]
+      summary: Erase one data subject's personal data
+      description: |
+        Destroys the subject's data-encryption key. The record, its
+        versions, its commitments and its history all remain and still
+        verify; the plaintext is gone everywhere at once, including in
+        backups taken before the request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [object_id, policy_id]
+              properties:
+                object_id: { type: string }
+                policy_id: { type: string }
+                reason: { type: string }
+                message: { type: string }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/keys:
+    post:
+      tags: [Keys]
+      summary: Enrol a customer key-encryption key
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, algo, public_key]
+              properties:
+                id: { type: string }
+                algo: { type: string, enum: [x25519, rsa-oaep-sha256] }
+                public_key: { type: string, description: Base64. X25519 raw, or RSA in PKIX form. }
+      responses:
+        "200": { description: Enrolled }
+
+  /api/v1/keys/{scope}/recovery-wrap:
+    get:
+      tags: [Keys]
+      summary: The customer's recovery wrap for one key scope
+      parameters:
+        - { name: scope, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/export:
+    get:
+      tags: [Operations]
+      summary: Stream the ledger's leaves for backup or standby replication
+      parameters:
+        - { name: after, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer } }
+      responses:
+        "200": { description: OK }
+
+  /api/v1/standby:
+    get:
+      tags: [Operations]
+      summary: A follower's replication position
+      responses:
+        "200": { description: OK }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        A Privasys ID access token. The acting role is chosen with the
+        `X-Register-Role` header when the caller holds more than one.
+
+  schemas:
+    Ref:
+      type: object
+      properties:
+        type: { type: string, enum: [corrects, supersedes, approves, relates] }
+        target: { type: string }
+
+    Proposal:
+      type: object
+      properties:
+        object_id: { type: string, description: Required for every action except create }
+        payload: { type: object }
+        evidence:
+          type: object
+          additionalProperties: { type: string, description: SHA-256 digest, lower-case hex }
+          description: The register records that a document with this digest was presented, never the document.
+        message: { type: string }
+        body: { type: string }
+        refs: { type: array, items: { $ref: "#/components/schemas/Ref" } }
+
+    Configuration:
+      type: object
+      properties:
+        tenant: { type: string }
+        commitment_key:
+          type: string
+          description: 64 hex characters. Omitted, the register derives one from its sealed master secret.
+        pack: { type: object, description: The schema pack, inline }
+        pack_ref: { type: string, description: The name of a pack baked into the image }
+        customer_kek:
+          type: object
+          properties:
+            id: { type: string }
+            algo: { type: string, enum: [x25519, rsa-oaep-sha256] }
+            public_key: { type: string }
+
+    EvidenceBundle:
+      type: object
+      description: |
+        A row, its ledger proof, and the signed checkpoint anchoring the
+        state it was read at. It verifies with nothing but itself, the
+        register's public key, and a checkpoint the holder already had.
+      properties:
+        register: { type: string }
+        statement: { type: string }
+        table: { type: string }
+        primary_key: { type: array }
+        present: { type: boolean }
+        row: { type: object }
+        ledger_key: { type: string, description: Hex }
+        ledger_value: { type: string, description: Hex }
+        path: { type: string, description: Hex. The leaf position the proof is about. }
+        proof: { type: string, description: Hex, in the ledger's binary proof format }
+        root: { type: string, description: Hex }
+        version: { type: integer }
+        checkpoint: { type: object }
+        key_id: { type: string }
+        alg: { type: string, enum: [ed25519] }
+        signature: { type: string, description: Base64, over the canonical bundle without this field }

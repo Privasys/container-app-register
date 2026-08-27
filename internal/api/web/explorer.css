@@ -1,0 +1,137 @@
+/* Copyright (c) Privasys. Licensed under the AGPL-3.0. */
+
+:root {
+  --bg: #fbfbfa;
+  --panel: #ffffff;
+  --ink: #16181d;
+  --muted: #656b78;
+  --line: #dfe1e6;
+  --accent: #1f4fd8;
+  --good: #0f7a4a;
+  --bad: #b0341f;
+  --warn: #8a6100;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14161a;
+    --panel: #1b1e24;
+    --ink: #e9ecf1;
+    --muted: #99a1b0;
+    --line: #2c313a;
+    --accent: #6f95ff;
+    --good: #4cc38a;
+    --bad: #f0806c;
+    --warn: #e0b341;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+header {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel);
+}
+
+header h1 { font-size: 17px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+
+#identity { display: flex; gap: 8px; flex-wrap: wrap; }
+
+input, select, button, textarea {
+  font: inherit; color: inherit;
+  background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 10px;
+}
+
+button { cursor: pointer; background: var(--panel); }
+button:hover { border-color: var(--accent); }
+
+nav {
+  display: flex; gap: 4px; padding: 10px 20px 0;
+  border-bottom: 1px solid var(--line); background: var(--panel);
+}
+
+nav button {
+  border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  background: none; padding: 8px 12px; color: var(--muted);
+}
+
+nav button.active { color: var(--ink); border-bottom-color: var(--accent); }
+
+main { padding: 18px 20px 60px; max-width: 1180px; }
+
+.view { display: block; }
+.hidden { display: none; }
+
+form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+
+.list { display: flex; flex-direction: column; gap: 2px; }
+
+.entry {
+  display: grid; grid-template-columns: 96px 1fr auto; gap: 12px;
+  align-items: baseline; padding: 8px 10px;
+  border: 1px solid transparent; border-radius: 6px; cursor: pointer;
+}
+
+.entry:hover { border-color: var(--line); background: var(--panel); }
+.entry .id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.entry .who { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.entry .summary { font-weight: 500; }
+.entry .kind { font-size: 12px; color: var(--muted); margin-left: 8px; font-weight: 400; }
+
+.detail {
+  margin-top: 18px; padding: 16px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 8px;
+}
+
+.detail:empty { display: none; }
+
+.detail h2 { margin: 0 0 4px; font-size: 15px; }
+.detail h3 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase;
+             letter-spacing: 0.06em; color: var(--muted); }
+
+pre {
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  padding: 10px 12px; overflow-x: auto; margin: 0;
+}
+
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 500; }
+
+code, .hash { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+
+.note { color: var(--muted); font-size: 13.5px; max-width: 70ch; margin: 0 0 14px; }
+
+.verdict { font-weight: 600; }
+.verdict.pass { color: var(--good); }
+.verdict.fail { color: var(--bad); }
+.verdict.unknown { color: var(--warn); }
+
+.check { display: flex; gap: 10px; padding: 5px 0; align-items: baseline; }
+.check .mark { width: 1.4em; font-weight: 700; }
+.check.pass .mark { color: var(--good); }
+.check.fail .mark { color: var(--bad); }
+.check.unknown .mark { color: var(--warn); }
+.check .why { color: var(--muted); font-size: 13px; }
+
+.diff-add { color: var(--good); }
+.diff-del { color: var(--bad); text-decoration: line-through; }
+
+footer {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  padding: 6px 20px; font-size: 12px; color: var(--muted);
+  background: var(--panel); border-top: 1px solid var(--line);
+}
+
+.error { color: var(--bad); }

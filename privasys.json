@@ -1,0 +1,137 @@
+{
+    "config_api": {
+        "method": "POST",
+        "path": "/configure"
+    },
+    "tools": [
+        {
+            "name": "configure",
+            "role": "config",
+            "description": "Bring the register up: the tenant it serves, the schema pack that defines what it holds, and optionally the ledger commitment key. The runtime keeps every other endpoint at HTTP 503 until this succeeds, and re-arms the gate on each restart, so a delivered commitment key exists only in memory. The app commits SHA-256 of the key to the RA-TLS leaf at OID 1.3.6.1.4.1.65230.3.5.1.",
+            "endpoint": "/configure",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tenant": {
+                        "type": "string",
+                        "description": "The tenant this register serves.",
+                        "x-privasys": { "label": "Tenant" }
+                    },
+                    "pack_ref": {
+                        "type": "string",
+                        "description": "The name of a schema pack baked into the image. Use 'car-register' for the vehicle register shipped with this build.",
+                        "x-privasys": { "label": "Schema pack" }
+                    },
+                    "commitment_key": {
+                        "type": "string",
+                        "description": "The ledger commitment key, 64 hex characters. Leave empty to have the register derive one from its sealed master secret.",
+                        "x-privasys": { "secret": true, "label": "Commitment key" }
+                    },
+                    "checkpoint_interval": {
+                        "type": "string",
+                        "description": "How often a root checkpoint is issued on a quiet register, e.g. 24h."
+                    }
+                },
+                "required": ["tenant"]
+            }
+        },
+        {
+            "name": "lookup",
+            "role": "action",
+            "description": "Look up a record by its natural key and return it with a signed proof. A key that is not registered comes back with an absence proof: 'this was never registered here' is a statement the register can prove, not a silence.",
+            "endpoint": "/tools/lookup",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "class": {
+                        "type": "string",
+                        "description": "The record class, e.g. vehicle or plate.",
+                        "x-privasys": { "label": "Class" }
+                    },
+                    "natural_key": {
+                        "type": "string",
+                        "description": "The natural key: a VIN, a plate number.",
+                        "x-privasys": { "label": "Key" }
+                    }
+                },
+                "required": ["class", "natural_key"]
+            }
+        },
+        {
+            "name": "propose",
+            "role": "action",
+            "description": "Start a workflow: a first registration, an ownership transfer, a correction, a status change. The proposal is reviewed, or settled under policy when the workflow permits it and every condition holds. Every step is a signed transaction carrying who, when and why.",
+            "endpoint": "/tools/propose",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "workflow": { "type": "string", "description": "The workflow to start." },
+                    "object_id": { "type": "string", "description": "The record the proposal is about; omit for a workflow that creates one." },
+                    "payload": { "type": "object", "description": "The proposed record body, or the workflow's declared input." },
+                    "evidence": { "type": "object", "description": "Required document digests, as SHA-256 in lower-case hex. The register records the digest, never the document." },
+                    "message": { "type": "string", "description": "Commit summary, at most 72 characters." },
+                    "body": { "type": "string", "description": "The long-form part of the commit message." }
+                },
+                "required": ["workflow"]
+            }
+        },
+        {
+            "name": "log",
+            "role": "status",
+            "description": "The transaction log, newest first, one line each: who changed what, when, under which role, and the ledger root the change produced.",
+            "endpoint": "/tools/log",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "class": { "type": "string" },
+                    "object_id": { "type": "string" },
+                    "kind": { "type": "string" },
+                    "limit": { "type": "integer" }
+                }
+            }
+        },
+        {
+            "name": "query",
+            "role": "action",
+            "description": "Run one of the register's declared queries: counts by status, transfers since a date, a party's whole ownership history. The register accepts no SQL from callers, only the queries its pack declared, with typed parameters.",
+            "endpoint": "/tools/query",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "The query name." },
+                    "params": { "type": "object", "description": "Typed parameters for the query." }
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "status",
+            "role": "status",
+            "description": "The register's position: ledger root and version, transaction and record counts, proposals awaiting action, pruned versions, destroyed keys, and the last signed checkpoint.",
+            "endpoint": "/tools/status",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "checkpoint",
+            "role": "action",
+            "description": "Sign the register's current state as a root checkpoint. Customers hold these outside the register; they are what makes a rolled-back history detectable from the outside.",
+            "endpoint": "/tools/checkpoint",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "reason": { "type": "string", "description": "Why this checkpoint is being issued." }
+                }
+            }
+        }
+    ],
+    "store": {
+        "tagline": "A schema-driven, tamper-evident register of records: every change is a signed transaction with a reason, every record comes with a proof, and lawful deletion is explicit rather than quiet.",
+        "category": "Developer Tools",
+        "keywords": "register, ledger, tamper evident, merkle, audit trail, provenance, records management, vehicle register, byok, erasure, gdpr, attestation, ra-tls, confidential computing, tdx",
+        "website_url": "https://privasys.org",
+        "support_email": "contact@privasys.org",
+        "privacy_url": "https://privasys.org/legal/privacy/",
+        "tos_url": "https://privasys.org/legal/terms/",
+        "description": "A register of records that can prove what it holds, what it once held, and that nothing was changed behind anyone's back.\n\nEVERY CHANGE HAS A REASON\nEvery state-changing operation is a transaction carrying a git-like commit envelope: author, acting role, timestamp, a required message, and typed links to earlier work. The envelope and the effects are hashed together, so a change and the reason for it are one object. A messageless transaction is refused at the API and never reaches storage.\n\nRECORDS THAT COME WITH PROOFS\nState lives in an authenticated key-value store whose 32-byte root attests the whole database. Any record can be returned with an inclusion proof that verifies offline against a signed root checkpoint; a key that is not registered comes back with an absence proof. Listing, filtering, counting and joining run over the same ledger, and every row served is re-verified through it.\n\nSCHEMA-DRIVEN, NOT HARD-CODED\nWhat a register holds is declared in a pack: classes with JSON schemas, propose/review/approve workflows with gates and conditions, roles, retention policies, saved queries. The pack is data, committed to the ledger, so the rules a decision was taken under are as auditable as the decision. A national vehicle register ships as the reference pack.\n\nDELETION THAT IS LAWFUL AND PROVABLE\nRetention pruning and data-subject erasure are signed, policy-gated transactions. A pruned version says so instead of appearing never to have existed, and erasure destroys the subject's encryption key, so the plaintext is gone everywhere at once while the record and its proofs remain intact.\n\nCUSTOMER-HELD KEYS AND ANCHORS\nPersonal data is encrypted under per-subject keys, wrapped both for the running service and for a key-encryption key the customer enrolled. Signed root checkpoints are delivered to the customer, and a small verifier checks them with nothing but the files and a public key.\n\nWHO IT IS FOR\nRegistries, registers of interest, asset and title registers, regulated record-keeping: anywhere the question is not only what the record says but whether anyone can show it has not been quietly rewritten."
+    }
+}

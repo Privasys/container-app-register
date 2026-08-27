@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register explorer</title>
+<link rel="stylesheet" href="explorer.css">
+</head>
+<body>
+<header>
+  <h1>Register explorer</h1>
+  <div id="identity">
+    <input id="token" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false">
+    <input id="role" type="text" placeholder="Acting role (optional)" autocomplete="off" spellcheck="false">
+    <button id="connect">Connect</button>
+  </div>
+</header>
+
+<nav>
+  <button data-view="log" class="active">History</button>
+  <button data-view="records">Records</button>
+  <button data-view="proofs">Proofs</button>
+  <button data-view="checkpoints">Checkpoints</button>
+  <button data-view="retention">Retention</button>
+  <button data-view="health">Health</button>
+</nav>
+
+<main>
+  <section id="view-log" class="view">
+    <form id="log-filters">
+      <input name="class" placeholder="Class">
+      <input name="object_id" placeholder="Record">
+      <input name="author" placeholder="Author">
+      <input name="role" placeholder="Role">
+      <input name="kind" placeholder="Kind">
+      <input name="ref_type" placeholder="Reference type">
+      <button type="submit">Filter</button>
+    </form>
+    <div id="log-list" class="list"></div>
+    <div id="log-detail" class="detail"></div>
+  </section>
+
+  <section id="view-records" class="view hidden">
+    <form id="record-filters">
+      <select name="class" id="record-class"></select>
+      <input name="q" placeholder="Natural key starts with">
+      <input name="status" placeholder="Status">
+      <button type="submit">Search</button>
+    </form>
+    <div id="record-list" class="list"></div>
+    <div id="record-detail" class="detail"></div>
+  </section>
+
+  <section id="view-proofs" class="view hidden">
+    <p class="note">
+      A proof is checked here, in this page, against the root a signed checkpoint
+      names. The recomputation needs nothing from the register beyond the bundle
+      it handed you.
+    </p>
+    <form id="proof-form">
+      <select name="class" id="proof-class"></select>
+      <input name="key" placeholder="Natural key (VIN, plate…)" required>
+      <button type="submit">Fetch and verify</button>
+    </form>
+    <div id="proof-result" class="detail"></div>
+  </section>
+
+  <section id="view-checkpoints" class="view hidden">
+    <div id="checkpoint-key" class="note"></div>
+    <div id="checkpoint-list" class="list"></div>
+  </section>
+
+  <section id="view-retention" class="view hidden">
+    <div id="retention-list" class="list"></div>
+  </section>
+
+  <section id="view-health" class="view hidden">
+    <div id="health-body" class="detail"></div>
+  </section>
+</main>
+
+<footer>
+  <span id="status-line">not connected</span>
+</footer>
+
+<script src="verify.js"></script>
+<script src="explorer.js"></script>
+</body>
+</html>

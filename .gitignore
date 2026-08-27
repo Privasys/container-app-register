@@ -1,0 +1,14 @@
+# Build output
+/register
+/register.exe
+/register-verify
+/register-verify.exe
+/dist/
+/out/
+
+# Local run state (the sealed volume's stand-in)
+/.data/
+
+# Go
+*.test
+*.out
