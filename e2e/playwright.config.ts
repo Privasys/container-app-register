@@ -10,6 +10,9 @@ const BASE_URL = process.env.REGISTER_E2E_URL || `http://127.0.0.1:${PORT}`;
 
 export default defineConfig({
     testDir: E2E_DIR,
+    // The screenshot pass has its own config; it writes files and is
+    // not a test.
+    testMatch: '**/*.spec.ts',
     outputDir: path.join(E2E_DIR, 'test-results'),
     // The suite drives one register. Running specs in parallel against a
     // single-writer store would test the scheduler, not the register.

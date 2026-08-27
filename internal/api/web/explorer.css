@@ -76,14 +76,20 @@ form { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 
 .list { display: flex; flex-direction: column; gap: 2px; }
 
+/* The first column sizes to the longest identifier in the list, so a
+   17-character VIN does not run into the column beside it while a
+   12-character transaction id still lines up with its neighbours. */
 .entry {
-  display: grid; grid-template-columns: 96px 1fr auto; gap: 12px;
+  display: grid; grid-template-columns: minmax(96px, max-content) 1fr auto; gap: 16px;
   align-items: baseline; padding: 8px 10px;
   border: 1px solid transparent; border-radius: 6px; cursor: pointer;
 }
 
 .entry:hover { border-color: var(--line); background: var(--panel); }
-.entry .id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.entry .id {
+  font-family: var(--mono); font-size: 12px; color: var(--muted);
+  white-space: nowrap;
+}
 .entry .who { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .entry .summary { font-weight: 500; }
 .entry .kind { font-size: 12px; color: var(--muted); margin-left: 8px; font-weight: 400; }

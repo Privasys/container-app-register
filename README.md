@@ -75,6 +75,32 @@ register additionally publishes SHA-256 of its commitment key at OID
 `1.3.6.1.4.1.65230.3.5.2`, so the same handshake that proves what code
 is running also proves what key it was given and what state it serves.
 
+## What it looks like
+
+One transaction, in full: what changed, who changed it and under which
+role, why, the roots either side, the typed links to the proposal it
+approves and the record it corrects, and the effects themselves.
+
+![A transaction in the explorer](docs/screenshots/transaction.png)
+
+An evidence bundle, checked in the page rather than taken on trust. The
+proof is recomputed from hashes, the signature is checked against a key
+the reader fetched once, and the anchor is the checkpoint attesting that
+exact state.
+
+![A verified proof](docs/screenshots/proof.png)
+
+The same bundle after one byte was altered between the register and the
+page. The tree is untouched, so the proof still folds; the row no longer
+matches what was signed, and the page says which check failed and why.
+
+![A tampered proof](docs/screenshots/proof-tampered.png)
+
+More in [`docs/screenshots/`](docs/screenshots): the log, a record's
+timeline with the diff a correction produced, personal data withheld
+from a role without clearance, the checkpoint chain, and the retention
+report.
+
 ## How a change lands
 
 ```
@@ -240,17 +266,38 @@ from. A standby that has finished a pull compares its own root with the
 primary's and reports a mismatch rather than papering over it, because
 a standby that cannot prove it matches is not a standby.
 
+## Shape of the thing
+
+Decisions, rather than gaps.
+
+- **One active register, with a warm standby.** A register has a single
+  writer by nature: the log is an order, and an order is easier to keep
+  than to reconstruct. Commits already carry `root_before` and
+  `root_after`, which is the hard part of replication, so scaling out
+  when a deployment needs it is a normal piece of work rather than a
+  redesign.
+- **The core does what the SQL dialect does not.** The embedded engine
+  has no foreign keys, column defaults or multi-statement transactions.
+  Referential rules, natural-key uniqueness and the ordering of a
+  governance action therefore live in the register, where they can
+  return an explanation instead of a constraint violation. The unique
+  indexes the engine does provide are kept as well: the index is the
+  guarantee, the check is the message.
+- **Payloads are JSON, not columns.** A record is validated against its
+  schema and stored whole; only the properties a pack marks queryable
+  are projected into a table. That is what lets a schema change without
+  a migration, and what keeps personal data out of the query surface.
+
 ## Limits
 
-Stated plainly, because a register that overclaims is worse than one
-that does less.
+Worth knowing before relying on any of it.
 
 - **A governance action is a short sequence of commits, not one.** The
   SQL layer is autocommit-only, so the transaction row, its effects and
   the mark that it was applied land at successive ledger versions. The
-  write-ahead order is what makes the sequence safe; a single-commit
-  form would need a batching API in the SQL layer, which does not exist
-  yet.
+  write-ahead order makes the sequence safe — the ledger never holds an
+  effect whose reason it does not already hold — but the ideal is one
+  commit, and that needs a batching API the SQL layer does not have.
 - **Creating the catalogue moves the root without a transaction.** Base
   tables and per-class query tables are structure rather than state.
   This happens at bootstrap and when a pack changes which properties
@@ -260,14 +307,8 @@ that does less.
   reads are bound to the in-memory root and cannot be rolled back while
   the process runs. A backend that replays a complete old store
   together with its matching internal checkpoint is not locally
-  detectable; that is what the customer-held checkpoints are for.
-- **Multi-node replication is out of scope.** One active register with
-  a warm standby. Commits already carry `root_before` and `root_after`,
-  so nothing here precludes it.
-- **The SQL dialect is narrow.** No multi-statement transactions, no
-  foreign keys, no `DECIMAL`, `JSON` or `ENUM`, no column defaults.
-  Referential rules and uniqueness are enforced in the core alongside
-  the unique indexes the layer does support.
+  detectable; closing that is what the customer-held checkpoints do, and
+  they only do it if you keep them.
 - **Not certified, not independently audited.** The confidentiality of
   data at rest is the confidential VM's encrypted volume, not this
   application. What this application adds is integrity, attribution,
