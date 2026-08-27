@@ -1,0 +1,19 @@
+{
+  "name": "container-app-register-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests for the register's operator explorer, driven against a real register.",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "test": "playwright test",
+    "test:chromium": "playwright test --project=chromium",
+    "test:headed": "playwright test --project=chromium --headed",
+    "report": "playwright show-report",
+    "install-browsers": "playwright install --with-deps chromium firefox",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^26.4.0"
+  }
+}

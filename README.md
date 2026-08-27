@@ -160,6 +160,13 @@ root from the proof, checks the register's Ed25519 signature over the
 bundle, and checks the anchoring checkpoint. Nothing in that chain asks
 the register to be believed.
 
+The [`e2e/`](e2e) suite is what keeps that honest. It drives the page in
+Chromium and Firefox against a real register, and most of it is
+negative: it intercepts the evidence on its way to the page and edits
+it — flips the answer, substitutes the root, rewrites the row, forges
+the signature, detaches the anchor, truncates the proof — and requires
+the page to catch each one, naming which check failed and why.
+
 ## The API
 
 [`openapi.yaml`](internal/api/openapi.yaml), also served at

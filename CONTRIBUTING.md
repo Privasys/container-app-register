@@ -21,6 +21,7 @@ particular register.
 | [`internal/api`](internal/api) | REST surface, tool endpoints, and the operator explorer. |
 | [`packs/`](packs) | Schema packs. `car-register` is the national vehicle register the core is proved against. |
 | [`tools/`](tools) | `browser-verify.mjs`, which runs the explorer's in-page verifier outside a browser so it cannot silently drift from the Go one. |
+| [`e2e/`](e2e) | Playwright tests that drive the explorer in real browsers against a real register. |
 
 ## Building and testing
 
@@ -37,6 +38,25 @@ CI runs exactly these, then builds the image and drives it end to end:
 it configures a register, fetches a proof of presence and a proof of
 absence, verifies both with the shipped verifier, and confirms that an
 edited bundle stops verifying.
+
+The operator explorer has its own suite, in real browsers against a
+real register:
+
+```bash
+cd e2e
+npm ci
+npx playwright install --with-deps chromium firefox
+npm test                 # both browsers
+npm run test:headed      # watch it happen
+```
+
+It builds the binary, starts it on a fresh volume with the car-register
+pack, and drives the console. Most of it is about the proof view, and
+most of *that* is negative: the tests intercept the evidence on its way
+to the page and edit it — flip the answer, substitute the root, rewrite
+the row, forge the signature, detach the anchor, truncate the proof —
+and require the page to notice each time. A passing tamper test would
+mean the page is trusting the server, and the verification is theatre.
 
 To run one locally:
 
