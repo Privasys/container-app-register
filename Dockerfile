@@ -7,6 +7,16 @@
 # provenance-free on purpose: an OCI attestation index would change the
 # manifest digest the enclave pins at OID 1.3.6.1.4.1.65230.3.2.
 
+# The console is built first and copied in as static files: it is part of
+# the measured image, so the page a person runs is code a verifier can
+# read, and no unattested web server ever gets to serve it.
+FROM node:22-alpine AS ui
+WORKDIR /src/ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui ./
+RUN npm run build
+
 FROM golang:1.24-alpine AS builder
 
 WORKDIR /src
@@ -45,6 +55,22 @@ COPY privasys.json /privasys.json
 # Schema packs baked into the image. A configure call may name one with
 # `pack_ref`, or deliver its own inline.
 COPY packs /packs
+
+# The console.
+COPY --from=ui /src/ui/dist /web
+
+# Everything stays behind the configure gate until the attested configure
+# call succeeds.
+LABEL org.privasys.config_api="POST /configure"
+# The browser shell (public, measured code, no data) loads in the clear so
+# a sealed session can be established; "/" covers the root document only,
+# and /api is always sealed whatever is declared here. The label is
+# measured, so a verifier reads off the image exactly which paths this
+# register answers without a sealed session.
+LABEL org.privasys.static-unsealed-prefixes="/,/app-config.js,/assets/,/vendor/,/brand/,/favicon.svg,/openapi.yaml"
+LABEL org.opencontainers.image.source="https://github.com/Privasys/container-app-register"
+LABEL org.opencontainers.image.title="Privasys Register"
+LABEL org.opencontainers.image.description="A schema-driven, tamper-evident register of records"
 
 # No fixed port and no EXPOSE: the platform runs containers on the host
 # network and injects a unique $PORT per app, which the register binds.

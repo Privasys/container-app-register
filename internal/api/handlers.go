@@ -4,10 +4,14 @@
 package api
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +32,48 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 		body["error"] = failure
 	}
 	writeJSON(w, http.StatusOK, body)
+}
+
+// readiness is what the platform polls after a configure call: 200 once
+// the register is serving, 503 until then.
+func (s *Server) readiness(w http.ResponseWriter, _ *http.Request) {
+	s.mu.RLock()
+	state, failure := s.state, s.failure
+	s.mu.RUnlock()
+	if state != StateReady {
+		writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("register is %s", state), failure)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ready"})
+}
+
+var hostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?(:[0-9]{1,5})?$`)
+
+// appConfig tells the page which host it is being served as. On a
+// custom domain the page's own address is the adopter's name, but a
+// sealed session is attested against the platform hostname, so the page
+// is told rather than left to guess from its location.
+func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
+	host := strings.ToLower(r.Host)
+	if !hostRe.MatchString(host) {
+		writeError(w, http.StatusBadRequest, "bad host", "")
+		return
+	}
+	env := "production"
+	if strings.HasSuffix(strings.Split(host, ":")[0], ".test.privasys.org") {
+		env = "test"
+	}
+	doc := map[string]any{
+		"appHost": host, "environment": env, "version": s.Version, "name": s.Name,
+		"session": s.TrustSession,
+	}
+	if s.ClientID != "" {
+		doc["clientId"] = s.ClientID
+	}
+	cfg, _ := json.Marshal(doc)
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write([]byte("window.__REGISTER__=" + string(cfg) + ";\n"))
 }
 
 func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
@@ -59,8 +105,28 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "could not read the configuration", err.Error())
 		return
 	}
+	// A register that is already serving keeps serving. Its pack, tenant
+	// and commitment key are fixed for the life of the process, and
+	// opening the store a second time would only fail and take the
+	// running register down with it. What a later call can still do is
+	// name administrators.
+	if running, _, ready := s.register(); ready {
+		out := map[string]any{"status": "already_configured"}
+		if err := bootstrapMembers(running, body, out); err != nil {
+			writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
 	reg, verifier, err := s.Configure(body)
 	if err != nil {
+		s.Fail(err)
+		writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
+		return
+	}
+	out := map[string]any{"status": "configured"}
+	if err := bootstrapMembers(reg, body, out); err != nil {
 		s.Fail(err)
 		writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
 		return
@@ -71,18 +137,215 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "configured, but the register would not report", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"status": "configured", "register": status})
+	out["register"] = status
+	writeJSON(w, http.StatusOK, out)
+}
+
+// bootstrapMembers names the register's first administrators.
+//
+// The configure call runs again on every restart, because the gate
+// re-arms, so both halves are written to be repeated: a subject who
+// already holds the role is left alone, and an invitation is only
+// minted while nobody can manage membership, which is the one moment it
+// is needed.
+func bootstrapMembers(reg *register.Register, document []byte, out map[string]any) error {
+	var doc struct {
+		Admins      string `json:"admins"`
+		AdminInvite any    `json:"admin_invite"`
+		AdminRole   string `json:"admin_role"`
+	}
+	if len(document) > 0 {
+		_ = json.Unmarshal(document, &doc)
+	}
+	wantInvite := doc.AdminInvite == true || doc.AdminInvite == "true"
+	if doc.Admins == "" && !wantInvite {
+		return nil
+	}
+	role := doc.AdminRole
+	if role == "" {
+		var err error
+		if role, err = reg.MembersRole(); err != nil {
+			return err
+		}
+	}
+	added := 0
+	for _, sub := range strings.Split(doc.Admins, ",") {
+		if sub = strings.TrimSpace(sub); sub == "" {
+			continue
+		}
+		held, _, err := reg.GrantedRoles(reg.Options().Tenant, sub)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(held, role) {
+			continue
+		}
+		if _, err := reg.BootstrapMember(sub, role); err != nil {
+			return fmt.Errorf("admin %q: %w", sub, err)
+		}
+		added++
+	}
+	out["admins_added"] = added
+	if wantInvite {
+		administered, err := reg.Administered()
+		if err != nil {
+			return err
+		}
+		if !administered {
+			inv, secret, err := reg.BootstrapInvite(role, 24*time.Hour)
+			if err != nil {
+				return fmt.Errorf("admin invite: %w", err)
+			}
+			out["admin_invite"] = "/#/join/" + inv.ID + "/" + secret
+			out["admin_role"] = role
+		}
+	}
+	return nil
 }
 
 // -- status and shape ------------------------------------------------------
 
 func (s *Server) status(req *request) (any, error) { return req.reg.Status() }
 
+// me answers "who am I here". A person who is signed in and holds no
+// role gets an answer too, because that is the state an invitation
+// starts from.
 func (s *Server) me(req *request) (any, error) {
-	return map[string]any{
-		"principal":   req.p,
-		"permissions": req.p.Permissions(),
-	}, nil
+	pk := req.reg.Pack()
+	out := map[string]any{
+		"sub": req.id.Sub, "display": req.id.Display, "tenant": req.tenant,
+		"register": map[string]any{
+			"name": req.reg.Options().Name, "pack": pk.Name, "title": pk.Title,
+		},
+	}
+	if req.p == nil {
+		out["status"] = "no_role"
+		if !errors.Is(req.refusal, auth.ErrNoRole) {
+			// Roles are held, and may not be acted under: say which rule.
+			out["status"], out["refusal"] = "refused", req.refusal.Error()
+		}
+		return out, nil
+	}
+	titles := map[string]string{}
+	for _, name := range req.p.Roles {
+		if spec := pk.Model().Role(name); spec != nil {
+			titles[name] = spec.Title
+		}
+	}
+	out["status"] = "member"
+	out["principal"] = req.p
+	out["permissions"] = req.p.Permissions()
+	out["role_titles"] = titles
+	return out, nil
+}
+
+// -- membership ------------------------------------------------------------
+
+func (s *Server) listMembers(req *request) (any, error) {
+	members, err := req.reg.Members(req.p)
+	if err != nil {
+		return nil, err
+	}
+	roles := make([]map[string]any, 0)
+	for _, spec := range req.reg.Pack().Model().Roles() {
+		roles = append(roles, map[string]any{
+			"name": spec.Name, "title": spec.Title, "permissions": spec.Permissions,
+			"pii": spec.PII, "incompatible_with": spec.IncompatibleWith,
+		})
+	}
+	return map[string]any{"members": members, "roles": roles}, nil
+}
+
+func (s *Server) grantMember(req *request) (any, error) {
+	var in struct {
+		Sub     string `json:"sub"`
+		Role    string `json:"role"`
+		Display string `json:"display"`
+		Reason  string `json:"reason"`
+	}
+	if err := decode(req.r, &in); err != nil {
+		return nil, err
+	}
+	txn, err := req.reg.GrantRole(req.p, in.Sub, in.Role, in.Display, in.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}
+
+func (s *Server) revokeMember(req *request) (any, error) {
+	txn, err := req.reg.RevokeRole(req.p, req.r.PathValue("sub"), req.r.PathValue("role"),
+		req.r.URL.Query().Get("reason"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}
+
+func (s *Server) listInvites(req *request) (any, error) {
+	invites, err := req.reg.Invites(req.p)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"invites": invites}, nil
+}
+
+func (s *Server) createInvite(req *request) (any, error) {
+	var in struct {
+		Role      string `json:"role"`
+		Label     string `json:"label"`
+		ValidDays int    `json:"valid_days"`
+	}
+	if err := decode(req.r, &in); err != nil {
+		return nil, err
+	}
+	inv, secret, err := req.reg.CreateInvite(req.p, in.Role, in.Label, time.Duration(in.ValidDays)*24*time.Hour)
+	if err != nil {
+		return nil, err
+	}
+	// The secret is served here and nowhere else. It goes in the link's
+	// fragment, which a browser does not send to any server.
+	return map[string]any{"invite": inv, "link": "/#/join/" + inv.ID + "/" + secret}, nil
+}
+
+func (s *Server) revokeInvite(req *request) (any, error) {
+	txn, err := req.reg.RevokeInvite(req.p, req.r.PathValue("id"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}
+
+type inviteSecret struct {
+	Secret string `json:"secret"`
+}
+
+func (s *Server) checkInvite(req *request) (any, error) {
+	var in inviteSecret
+	if err := decode(req.r, &in); err != nil {
+		return nil, err
+	}
+	inv, err := req.reg.CheckInvite(req.tenant, req.r.PathValue("id"), in.Secret)
+	if err != nil {
+		return nil, err
+	}
+	title := inv.Role
+	if spec := req.reg.Pack().Model().Role(inv.Role); spec != nil && spec.Title != "" {
+		title = spec.Title
+	}
+	return map[string]any{"role": inv.Role, "role_title": title, "label": inv.Label, "expires_at": inv.ExpiresAt}, nil
+}
+
+func (s *Server) redeemInvite(req *request) (any, error) {
+	var in inviteSecret
+	if err := decode(req.r, &in); err != nil {
+		return nil, err
+	}
+	inv, txn, err := req.reg.RedeemInvite(req.tenant, req.id.Sub, req.id.Display, req.r.PathValue("id"), in.Secret)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"role": inv.Role, "transaction": txn}, nil
 }
 
 // packDocument describes the register's shape to a client: what it

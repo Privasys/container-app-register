@@ -72,6 +72,9 @@ func run(log *slog.Logger) error {
 
 	server := api.NewServer(log)
 	server.Version, server.Name, server.Manifest = version, cfg.Name, manifest
+	// The session header is the runtime's to assert. Off the platform
+	// nothing strips it from an inbound request, so it is not believed.
+	server.TrustSession, server.WebDir, server.ClientID = cfg.OnPlatform(), cfg.WebDir, cfg.ClientID
 
 	app := &application{cfg: cfg, log: log, material: material, server: server}
 	server.Configure = app.configure

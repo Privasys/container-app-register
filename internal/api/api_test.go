@@ -58,6 +58,14 @@ func newTestServer(t *testing.T) (*httptest.Server, *Server, *register.Register)
 
 	srv := NewServer(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.Version, srv.Name = "test", "test-register"
+	web := t.TempDir()
+	if err := os.WriteFile(filepath.Join(web, "index.html"), []byte("<title>Register</title>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(web, ".secret"), []byte("no"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv.WebDir = web
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, srv, reg
@@ -131,8 +139,8 @@ func TestAuthenticationAndRoles(t *testing.T) {
 	if status, _ := get(t, ts, "/api/v1/status", ""); status != http.StatusUnauthorized {
 		t.Errorf("no token = %d, want 401", status)
 	}
-	if status, _ := get(t, ts, "/api/v1/status", "dev:nobody:Nobody:some:other-role"); status != http.StatusUnauthorized {
-		t.Errorf("a token with no register role = %d, want 401", status)
+	if status, _ := get(t, ts, "/api/v1/status", "dev:nobody:Nobody:some:other-role"); status != http.StatusForbidden {
+		t.Errorf("a token with no register role = %d, want 403", status)
 	}
 
 	status, body := get(t, ts, "/api/v1/me", registrarToken)
@@ -283,14 +291,21 @@ func TestWriteThroughTheAPI(t *testing.T) {
 
 func TestExplorerAndOpenAPIAreServed(t *testing.T) {
 	ts, _, _ := newTestServer(t)
-	resp, err := ts.Client().Get(ts.URL + "/explorer/")
+	resp, err := ts.Client().Get(ts.URL + "/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Register explorer") {
-		t.Errorf("explorer = %d, %d bytes", resp.StatusCode, len(body))
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "<title>Register</title>") {
+		t.Errorf("shell = %d, %d bytes", resp.StatusCode, len(body))
+	}
+	if csp := resp.Header.Get("Content-Security-Policy"); !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Errorf("the shell is served without its frame policy: %q", csp)
+	}
+	// Nothing outside the built UI is reachable through the shell.
+	if status, _ := get(t, ts, "/.secret", ""); status != http.StatusNotFound {
+		t.Errorf("dotfile = %d, want 404", status)
 	}
 
 	resp, err = ts.Client().Get(ts.URL + "/openapi.yaml")

@@ -49,6 +49,11 @@ const (
 	KindCheckpoint     = "checkpoint.issue"
 	KindAudit          = "audit.close"
 	KindWebhookSet     = "webhook.set"
+	KindMemberGrant    = "member.grant"
+	KindMemberRevoke   = "member.revoke"
+	KindInviteCreate   = "invite.create"
+	KindInviteRedeem   = "invite.redeem"
+	KindInviteRevoke   = "invite.revoke"
 	KindPackSeed       = "pack.seed"
 )
 

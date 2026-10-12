@@ -151,6 +151,8 @@ var pkColumns = map[string][]string{
 	"dek_keys":        {"scope"},
 	"prune_marks":     {"txid", "idx"},
 	"webhooks":        {"id"},
+	"members":         {"id"},
+	"invites":         {"id"},
 	"registry":        {"k"},
 }
 

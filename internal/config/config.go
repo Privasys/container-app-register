@@ -83,6 +83,15 @@ type Config struct {
 
 	// StandbyInterval is how often a standby pulls from its primary.
 	StandbyInterval time.Duration
+
+	// WebDir is where the built browser UI lives in the image.
+	WebDir string
+
+	// ClientID is the client the console signs people in as at the
+	// identity provider. It decides which subject the register sees for
+	// a person, and nothing else: a wrong value signs in strangers, it
+	// does not let anyone in.
+	ClientID string
 }
 
 // Modes.
@@ -107,6 +116,8 @@ func Load() (*Config, error) {
 		PrimaryURL:         os.Getenv("REGISTER_PRIMARY_URL"),
 		CommitmentKeyHex:   os.Getenv("REGISTER_COMMITMENT_KEY"),
 		Tenant:             env("REGISTER_TENANT", "default"),
+		WebDir:             env("REGISTER_WEB_DIR", "/web"),
+		ClientID:           os.Getenv("REGISTER_CLIENT_ID"),
 		PackPath:           os.Getenv("REGISTER_PACK"),
 		CheckpointInterval: duration("REGISTER_CHECKPOINT_INTERVAL", 24*time.Hour),
 		StandbyInterval:    duration("REGISTER_STANDBY_INTERVAL", 30*time.Second),

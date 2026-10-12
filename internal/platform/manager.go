@@ -31,11 +31,11 @@ const (
 	// deployer delivered. A verifying client can confirm the register
 	// was given exactly the key it expects, without the key leaving the
 	// enclave.
-	OIDConfiguration = "1.3.6.1.4.1.65230.3.5.1"
+	OIDConfiguration = "1.3.6.1.4.1.65230.5.4.1"
 	// OIDLedgerRoot carries the register's live ledger root, so a
 	// challenge-mode handshake returns the current authenticated state
 	// as part of the certificate rather than as a claim in the body.
-	OIDLedgerRoot = "1.3.6.1.4.1.65230.3.5.2"
+	OIDLedgerRoot = "1.3.6.1.4.1.65230.5.4.2"
 )
 
 // Manager is the in-enclave callback client.

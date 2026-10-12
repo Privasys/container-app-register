@@ -37,6 +37,16 @@ if (build.status !== 0) {
   process.exit(build.status ?? 1);
 }
 
+// The console is built the way the image builds it, and served by the
+// register from that directory: the suite drives the page a deployment
+// would serve, not a development server standing in for it.
+const UI_DIR = path.join(REPO, 'ui');
+const ui = spawnSync('npm run build', { cwd: UI_DIR, stdio: 'inherit', shell: true });
+if (ui.status !== 0) {
+  console.error('e2e: could not build the console (run `npm ci` in ui/ first)');
+  process.exit(ui.status ?? 1);
+}
+
 const child = spawn(binary, [], {
   cwd: REPO,
   stdio: 'inherit',
@@ -45,6 +55,7 @@ const child = spawn(binary, [], {
     PORT,
     REGISTER_DATA_DIR: DATA_DIR,
     REGISTER_DEV_AUTH: '1',
+    REGISTER_WEB_DIR: path.join(UI_DIR, 'dist'),
     REGISTER_SELF_CONFIGURE: '1',
     REGISTER_PACK: path.join('packs', 'car-register', 'pack.json'),
     REGISTER_TENANT: 'gov',

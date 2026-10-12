@@ -208,4 +208,4 @@ async function verifyBundle(bundle, publicKeyB64) {
   return checks;
 }
 
-window.RegisterVerify = { verifyBundle, verifyProof, canonical, bytesToHex };
+export { verifyBundle, verifyProof, canonical, bytesToHex };

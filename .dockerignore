@@ -1,0 +1,8 @@
+.git
+.github
+docs
+e2e
+ui/node_modules
+ui/dist
+ui/.public
+**/.register-data

@@ -19,6 +19,12 @@ than editing these by hand.
 | `checkpoints.png` | The chain, and the key to verify it with. |
 | `retention.png` | Per-policy horizons: what is eligible for pruning, and what has been. |
 | `health.png` | Root, ledger version, counts, last checkpoint. |
+| `gate-dev.png` | What a development instance shows in place of sign-in: stand-in personas. On the platform this is the wallet sign-in. |
+| `no-role.png` | Signed in, and holding nothing: the identifier the register knows this person by, and what to do with it. |
+| `members-invite.png` | An invitation just issued. The link is shown once. |
+| `invitation.png` | The same link, opened by the person it was sent to. |
+| `membership-history.png` | The grant in the history: who redeemed which invitation, and when. |
+| `members.png` | Who holds which role, and the invitations that are out. |
 | `*-dark.png` | The explorer follows the reader's colour scheme. |
 
 The content is the pack's demonstration data. Names are fictional

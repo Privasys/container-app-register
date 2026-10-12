@@ -3,11 +3,14 @@
         "method": "POST",
         "path": "/configure"
     },
+    "configure": {
+        "readiness_path": "/readiness"
+    },
     "tools": [
         {
             "name": "configure",
             "role": "config",
-            "description": "Bring the register up: the tenant it serves, the schema pack that defines what it holds, and optionally the ledger commitment key. The runtime keeps every other endpoint at HTTP 503 until this succeeds, and re-arms the gate on each restart, so a delivered commitment key exists only in memory. The app commits SHA-256 of the key to the RA-TLS leaf at OID 1.3.6.1.4.1.65230.3.5.1.",
+            "description": "Bring the register up: the tenant it serves, the schema pack that defines what it holds, and optionally the ledger commitment key. The runtime keeps every other endpoint at HTTP 503 until this succeeds, and re-arms the gate on each restart, so a delivered commitment key exists only in memory. The app commits SHA-256 of the key to the RA-TLS leaf at OID 1.3.6.1.4.1.65230.5.4.1.",
             "endpoint": "/configure",
             "inputSchema": {
                 "type": "object",
@@ -26,6 +29,21 @@
                         "type": "string",
                         "description": "The ledger commitment key, 64 hex characters. Leave empty to have the register derive one from its sealed master secret.",
                         "x-privasys": { "secret": true, "label": "Commitment key" }
+                    },
+                    "admin_invite": {
+                        "type": "boolean",
+                        "description": "Return a single-use link, valid 24 hours, that gives whoever opens it and signs in the role that manages membership. Use it for the first administrator: the subject the register sees for a person is its own, not their platform identity, so it cannot be named in advance. Ignored once somebody administers the register, so it is safe to leave set across restarts.",
+                        "x-privasys": { "label": "Administrator invitation" }
+                    },
+                    "admins": {
+                        "type": "string",
+                        "description": "Comma-separated subjects, as this register sees them, to grant the role that manages membership. For people who have already signed in and read their identifier off the page.",
+                        "x-privasys": { "label": "Administrators" }
+                    },
+                    "admin_role": {
+                        "type": "string",
+                        "description": "The role an administrator is given. Defaults to the first role in the pack that may manage members.",
+                        "x-privasys": { "label": "Administrator role" }
                     },
                     "checkpoint_interval": {
                         "type": "string",

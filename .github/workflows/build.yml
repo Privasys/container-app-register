@@ -77,6 +77,12 @@ jobs:
             docker logs register-smoke || true; exit 1
           fi
 
+          # The console is in the image, at the root, and readable before
+          # anything is configured: a browser has to load it to sign in.
+          curl -fsS "http://localhost:$PORT/" | grep -q '<title>Register</title>'
+          curl -fsS "http://localhost:$PORT/app-config.js" | grep -q '"session":false'
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/readiness")" = 503
+
           # Unconfigured, the register serves its probe and refuses the rest.
           code=$(curl -s -o /dev/null -w '%{http_code}' \
             -H 'Authorization: Bearer dev:registrar-1:Registrar:register:registrar' \
@@ -87,8 +93,13 @@ jobs:
 
           curl -fsS -X POST "http://localhost:$PORT/configure" \
             -H 'Content-Type: application/json' \
-            -d '{"tenant":"gov","pack_ref":"car-register"}' > /tmp/configured.json
-          echo "--- configured ---"; cat /tmp/configured.json
+            -d '{"tenant":"gov","pack_ref":"car-register","admin_invite":true}' > /tmp/configured.json
+          echo "--- configured ---"; jq 'del(.admin_invite)' /tmp/configured.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/readiness")" = 200
+          # Nobody administers a new register, so the configure call hands
+          # back the one invitation that lets somebody start.
+          jq -e '.admin_invite | test("^/#/join/[0-9a-f]{16}/")' /tmp/configured.json > /dev/null
+          jq -e '.admin_role == "operator"' /tmp/configured.json > /dev/null
 
           AUTH='Authorization: Bearer dev:registrar-1:Registrar:register:registrar'
           curl -fsS -H "$AUTH" "http://localhost:$PORT/api/v1/status" > /tmp/status.json
@@ -179,7 +190,15 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: e2e/package-lock.json
+          cache-dependency-path: |
+            e2e/package-lock.json
+            ui/package-lock.json
+
+      # The suite drives the console the image would serve, so it is
+      # built here the same way.
+      - name: Install the console's dependencies
+        working-directory: ui
+        run: npm ci --no-audit --no-fund
 
       - name: Install
         working-directory: e2e
@@ -270,8 +289,8 @@ jobs:
           its request by inspecting the quote in the server certificate.
 
           This build additionally publishes two extensions on the per-container leaf:
-          **1.3.6.1.4.1.65230.3.5.1**, SHA-256 over the commitment key the deployer
-          delivered, and **1.3.6.1.4.1.65230.3.5.2**, the register's live ledger root.
+          **1.3.6.1.4.1.65230.5.4.1**, SHA-256 over the commitment key the deployer
+          delivered, and **1.3.6.1.4.1.65230.5.4.2**, the register's live ledger root.
           EOF
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release edit "$TAG" --notes-file notes.md

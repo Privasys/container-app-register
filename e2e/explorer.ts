@@ -26,7 +26,7 @@ export const SEEDED = {
 
 /** Opens the explorer and connects with a token. */
 export async function connect(page: Page, token: string, role = ''): Promise<void> {
-    await page.goto('/explorer/');
+    await page.goto('/');
     await page.fill('#token', token);
     await page.fill('#role', role);
     await page.click('#connect');

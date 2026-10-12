@@ -197,6 +197,58 @@ test.describe('the explorer', () => {
     });
 });
 
+test.describe('membership', () => {
+    test.use({ viewport: { width: 1280, height: 940 }, deviceScaleFactor: 2 });
+
+    test('the gate of a development instance', async ({ page }) => {
+        await page.goto('/');
+        await expect(page.locator('#connect')).toBeVisible();
+        await shot(page, 'gate-dev');
+    });
+
+    test('signed in, holding no role', async ({ page }) => {
+        await page.goto('/');
+        await page.fill('#token', 'dev:kQ3vX9mTq0rYb1uE7aLw2sZc8dNf5hJp4gVi6oAxWyM');
+        await page.click('#connect');
+        await expect(page.locator('#my-subject')).toBeVisible();
+        await shot(page, 'no-role');
+    });
+
+    test('an invitation, issued, accepted, and in the history', async ({ page, browser }) => {
+        await connectAndWait(page, TOKENS.operator);
+        await openView(page, 'members');
+        await page.fill('#grant-form input[name="sub"]', 'Zt7mPq2LxV9cRb4nYw1sKd8fHj3gUa6eTo5iNcXvBqE');
+        await page.selectOption('#grant-form select[name="role"]', 'registrar');
+        await page.fill('#grant-form input[name="display"]', 'SPECIMEN, Rita');
+        await page.fill('#grant-form input[name="reason"]', 'Head of registrations');
+        await page.click('#grant-form button[type="submit"]');
+        await expect(page.locator('#member-list .entry')).toHaveCount(1);
+
+        await page.selectOption('#invite-form select[name="role"]', 'auditor');
+        await page.fill('#invite-form input[name="label"]', 'Court of auditors');
+        await page.click('#invite-form button[type="submit"]');
+        const link = (await page.locator('#invite-issued pre').innerText()).trim();
+        await shot(page, 'members-invite');
+
+        const guest = await (await browser.newContext({ viewport: { width: 1280, height: 940 }, deviceScaleFactor: 2 })).newPage();
+        await guest.goto(link);
+        await guest.fill('#token', 'dev:Hn4bWc7yQe1tRk9mZx2vLp6sAd3fGj8uXo5iNqYwCzT');
+        await guest.click('#connect');
+        await expect(guest.locator('#accept-invite')).toBeVisible();
+        await shot(guest, 'invitation');
+        await guest.click('#accept-invite');
+        await guest.locator('#log-list .entry', { hasText: 'Grant auditor' }).first().click();
+        await expect(guest.locator('#log-detail')).toContainText('acting as invitee');
+        await shot(guest, 'membership-history');
+
+        await page.click('#invite-issued button:has-text("Done")');
+        await openView(page, 'records');
+        await openView(page, 'members');
+        await expect(page.locator('#member-list .entry')).toHaveCount(2);
+        await shot(page, 'members');
+    });
+});
+
 test.describe('the explorer in the dark', () => {
     test.use({
         viewport: { width: 1280, height: 940 },

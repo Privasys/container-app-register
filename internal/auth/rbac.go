@@ -4,6 +4,7 @@
 package auth
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -24,6 +25,7 @@ const (
 	PermSchema      = "schema"      // register schemas and policies
 	PermKeys        = "keys"        // enrol customer key-encryption keys
 	PermAdmin       = "admin"       // webhooks, export, standby control
+	PermMembers     = "members"     // grant and revoke roles, invite people
 )
 
 // RoleSpec is one role in a register's role model, declared by the
@@ -108,8 +110,16 @@ type Principal struct {
 	perms map[string]bool
 }
 
-// Resolve maps a verified identity onto the role model. The requested
-// acting role, when given, must be one the caller actually holds.
+// ErrNoRole is returned for a caller who is who they say they are and
+// holds no role here. It is a different answer from "not authenticated":
+// the person can be told to ask for access, or to open an invitation.
+var ErrNoRole = errors.New("no register role: the caller holds none of this register's roles")
+
+// Resolve maps a verified identity onto the role model. A role is held
+// either because the identity provider says so (a token role the pack
+// maps) or because this register granted it to the subject. The
+// requested acting role, when given, must be one the caller actually
+// holds.
 func (m *Model) Resolve(id *Identity, tenant, requestedRole string) (*Principal, error) {
 	held := map[string]bool{}
 	for _, r := range id.Roles {
@@ -117,8 +127,13 @@ func (m *Model) Resolve(id *Identity, tenant, requestedRole string) (*Principal,
 			held[name] = true
 		}
 	}
+	for _, name := range id.Granted {
+		if _, ok := m.roles[name]; ok {
+			held[name] = true
+		}
+	}
 	if len(held) == 0 {
-		return nil, fmt.Errorf("no register role: the caller holds none of this register's identity-provider roles")
+		return nil, ErrNoRole
 	}
 	names := make([]string, 0, len(held))
 	for name := range held {

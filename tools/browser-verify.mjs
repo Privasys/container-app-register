@@ -23,16 +23,9 @@ if (!bundlePath || !keyPath) {
   process.exit(2);
 }
 
-// Load the page's verifier as the browser would: as a script that
-// publishes itself on `window`.
-const source = readFileSync(new URL('../internal/api/web/verify.js', import.meta.url), 'utf8');
-globalThis.window = {};
-const load = new Function(
-  'window',
-  'atob',
-  `${source}\nreturn window.RegisterVerify;`,
-);
-const verifier = load(globalThis.window, (b) => Buffer.from(b, 'base64').toString('binary'));
+// The page's verifier, the same module the console bundles. It uses
+// nothing but WebCrypto and atob, which Node has too.
+const verifier = await import('../ui/src/lib/verify.js');
 
 const bundle = JSON.parse(readFileSync(bundlePath, 'utf8'));
 const key = JSON.parse(readFileSync(keyPath, 'utf8'));

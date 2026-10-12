@@ -37,6 +37,10 @@ type Identity struct {
 	Email   string
 	Issuer  string
 	Roles   []string
+	// Granted are the register roles this register itself granted to
+	// the subject, as opposed to Roles, which the identity provider
+	// asserted. The API layer fills it in from the member table.
+	Granted []string
 	Claims  map[string]any
 }
 

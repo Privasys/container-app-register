@@ -39,6 +39,7 @@ tags:
   - name: Retention
   - name: Keys
   - name: Operations
+  - name: Membership
 
 paths:
   /health:
@@ -77,6 +78,112 @@ paths:
       responses:
         "200": { description: Configured; the gate lifts }
         "400": { description: Refused }
+
+  /readiness:
+    get:
+      tags: [Operations]
+      summary: 200 once the register is configured and serving
+      security: []
+      responses:
+        "200": { description: Ready }
+        "503": { description: Not configured yet, or configuration failed }
+
+  /api/v1/me:
+    get:
+      tags: [Membership]
+      summary: Who the caller is here, including a caller who holds no role yet
+      responses:
+        "200": { description: "status is member, no_role or refused" }
+
+  /api/v1/members:
+    get:
+      tags: [Membership]
+      summary: Every granted role, and the roles the pack declares
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Membership]
+      summary: Grant a role to a subject, as a signed transaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sub, role]
+              properties:
+                sub: { type: string }
+                role: { type: string }
+                display: { type: string }
+                reason: { type: string }
+      responses:
+        "200": { description: Granted }
+        "403": { description: Not permitted, or a breach of separation of duties }
+        "409": { description: Already held }
+
+  /api/v1/members/{sub}/{role}:
+    delete:
+      tags: [Membership]
+      summary: Revoke a role
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+        - { name: role, in: path, required: true, schema: { type: string } }
+        - { name: reason, in: query, schema: { type: string } }
+      responses:
+        "200": { description: Revoked }
+        "409": { description: The last member who can manage membership }
+
+  /api/v1/invites:
+    get:
+      tags: [Membership]
+      summary: Invitations, without their secrets
+      responses:
+        "200": { description: OK }
+    post:
+      tags: [Membership]
+      summary: Issue a single-use invitation; the link is returned once
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { type: string }
+                label: { type: string }
+                valid_days: { type: integer, maximum: 30 }
+      responses:
+        "200": { description: Issued }
+
+  /api/v1/invites/{id}:
+    delete:
+      tags: [Membership]
+      summary: Withdraw an unused invitation
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Withdrawn }
+
+  /api/v1/invites/{id}/check:
+    post:
+      tags: [Membership]
+      summary: What an invitation would grant, without using it
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: OK }
+        "410": { description: Not valid (unknown, used, withdrawn or expired) }
+
+  /api/v1/invites/{id}/redeem:
+    post:
+      tags: [Membership]
+      summary: Accept an invitation as the signed-in caller
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The role is granted }
+        "410": { description: Not valid (unknown, used, withdrawn or expired) }
 
   /api/v1/status:
     get:

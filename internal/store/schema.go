@@ -246,6 +246,46 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// Who holds which role in this register. A person signed in over a
+		// sealed session is known by a subject only this register sees, so
+		// their roles cannot come from the identity provider: they are
+		// granted here, by a transaction that says who granted them and why.
+		name: "members",
+		ddl: `CREATE TABLE ` + "`members`" + ` (
+			id VARCHAR(400) PRIMARY KEY,
+			tenant VARCHAR(64) NOT NULL,
+			sub VARCHAR(256) NOT NULL,
+			role VARCHAR(64) NOT NULL,
+			display VARCHAR(128) NOT NULL,
+			granted_by VARCHAR(256) NOT NULL,
+			granted_at BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL
+		)`,
+		indexes: []string{
+			"CREATE INDEX `member_sub` ON `members` (tenant, sub)",
+		},
+	},
+	{
+		// Invitations: a single-use link that grants one role to whoever
+		// opens it and signs in. Only the hash of the link's secret is
+		// kept, so the log can show an invitation without being one.
+		name: "invites",
+		ddl: `CREATE TABLE ` + "`invites`" + ` (
+			id VARCHAR(32) PRIMARY KEY,
+			tenant VARCHAR(64) NOT NULL,
+			role VARCHAR(64) NOT NULL,
+			label VARCHAR(128) NOT NULL,
+			secret_hash VARBINARY(32) NOT NULL,
+			created_by VARCHAR(256) NOT NULL,
+			created_at BIGINT NOT NULL,
+			expires_at BIGINT NOT NULL,
+			used_by VARCHAR(256) NOT NULL,
+			used_at BIGINT NOT NULL,
+			revoked BOOLEAN NOT NULL,
+			txid CHAR(64) NOT NULL
+		)`,
+	},
+	{
 		name: "registry",
 		ddl: `CREATE TABLE ` + "`registry`" + ` (
 			k VARCHAR(96) PRIMARY KEY,

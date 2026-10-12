@@ -80,8 +80,8 @@ doing so is a preimage attack.
 service, so a client that verified the certificate has verified a
 hardware quote over the measurement of the build serving it. The
 register additionally publishes SHA-256 of its commitment key at OID
-`1.3.6.1.4.1.65230.3.5.1` and its live ledger root at
-`1.3.6.1.4.1.65230.3.5.2`, so the same handshake that proves what code
+`1.3.6.1.4.1.65230.5.4.1` and its live ledger root at
+`1.3.6.1.4.1.65230.5.4.2`, so the same handshake that proves what code
 is running also proves what key it was given and what state it serves.
 
 ## What it looks like
@@ -166,12 +166,14 @@ wrong rather than reporting a corrupt store.
 Locally, without the platform:
 
 ```bash
+(cd ui && npm ci && npm run build)
 PORT=8080 REGISTER_DATA_DIR=./.data REGISTER_DEV_AUTH=1 \
 REGISTER_SELF_CONFIGURE=1 REGISTER_PACK=packs/car-register/pack.json \
-go run ./cmd/register
+REGISTER_WEB_DIR=ui/dist go run ./cmd/register
 ```
 
-Then open `http://localhost:8080/explorer/`.
+Then open `http://localhost:8080/`. A development instance has nobody
+to sign in, so the console offers stand-in personas instead.
 
 ### Environment
 
@@ -179,21 +181,60 @@ Then open `http://localhost:8080/explorer/`.
 | --- | --- |
 | `PORT` | The host-network port the platform assigns. Required; there is no fallback. |
 | `REGISTER_DATA_DIR` | The sealed volume. Default `/data`. |
-| `REGISTER_OIDC_ISSUER` | Identity provider. Default `https://privasys.id`. |
-| `REGISTER_OIDC_AUDIENCE` | The audience tokens must carry. |
+| `REGISTER_WEB_DIR` | Where the built console lives. Default `/web`, which is where the image puts it. |
+| `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. |
+| `REGISTER_OIDC_ISSUER` | Identity provider for bearer tokens. Default `https://privasys.id`. |
+| `REGISTER_OIDC_AUDIENCE` | The audience bearer tokens must carry. |
 | `REGISTER_CHECKPOINT_INTERVAL` | Cadence for scheduled checkpoints. Default `24h`. |
 | `REGISTER_MODE` | `active` or `standby`. |
 | `REGISTER_PRIMARY_URL` | The active register a standby follows. |
 | `REGISTER_SELF_CONFIGURE` | Boot straight into a working register instead of waiting to be configured. Development, and the standby role. |
 | `REGISTER_DEV_AUTH` | Accept `dev:<sub>:<display>:<roles>` tokens instead of verifying them. Refused when the platform's callback credentials are present. |
 
-## The operator explorer
+## Signing in, and who holds which role
 
-`/explorer/` is a static page and an ordinary client of the same API:
+The console is served from the register's own root, out of the measured
+image: the page a person runs is code a verifier can read, and no
+unattested web server gets to serve it. The image declares, in a
+measured label, the handful of paths that load without a sealed session
+(the page and its assets). Everything under `/api` is sealed.
+
+A person signs in with the Privasys Wallet. The browser then talks to
+the register over a sealed session, end to end to the enclave, and the
+enclave tells the register who is calling. The subject it names is the
+register's own: no other service sees the same identifier for that
+person, and the identity provider attaches no roles to it.
+
+So the register keeps its own answer to "who may do what", and keeps it
+the way it keeps everything else. A role is granted by a person, for a
+reason, in a signed transaction; taking it away is another. The history
+shows who made someone a registrar.
+
+- The configure call can return a single-use **administrator
+  invitation** (`"admin_invite": true`). Whoever opens the link and
+  signs in holds the role that manages membership: the first role in
+  the pack with the `members` permission, `operator` in the vehicle
+  register.
+- From there, administrators issue invitations for the other roles, or
+  grant a role directly to a subject someone read off their own screen.
+  An invitation's secret travels in the link's fragment and only its
+  hash is recorded.
+- Two roles a pack declares incompatible cannot be granted to the same
+  person, and the last person who can manage membership cannot be
+  removed.
+
+Machines keep the other door: a bearer token from the identity
+provider, whose roles the pack maps with `oidc_roles`. Both doors lead
+to the same role model.
+
+## The console
+
+The console is a static page and an ordinary client of the same API:
 there is no privileged route into the register that only the console
 can take. It shows the git-log view with filters, an object timeline
 with diffs, transaction detail with the roots before and after, the
-retention horizon report, and the checkpoint chain.
+retention horizon report, the checkpoint chain, and the members of the
+register with the invitations that are out.
 
 Its proof view is the part worth looking at. It fetches an evidence
 bundle and verifies it **in the browser**: it recomputes the Merkle

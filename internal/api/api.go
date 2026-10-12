@@ -5,11 +5,17 @@
 // operator explorer, and the configure endpoint the platform's
 // configure-then-freeze gate drives.
 //
-// Transport security is the enclave's: Caddy terminates RA-TLS in front
-// of this handler, so a client that verified the certificate has
-// already verified the measurement of the build serving it. What is
-// left to this package is who the caller is, what their role permits,
-// and refusing everything else.
+// Transport security is the enclave's: RA-TLS terminates in front of
+// this handler, so a client that verified the certificate has already
+// verified the measurement of the build serving it. What is left to
+// this package is who the caller is, what their role permits, and
+// refusing everything else.
+//
+// A caller is known one of two ways. A person in a browser arrives over
+// a sealed session, and the runtime asserts who they are in the
+// X-Privasys-Sub header, which it strips from everything inbound. A
+// machine arrives with a bearer token, verified here against the
+// identity provider's published keys.
 package api
 
 import (
@@ -65,6 +71,18 @@ type Server struct {
 	// memory rather than in the ledger: whether somebody else's endpoint
 	// answered is not a fact about this register.
 	Deliveries func() []webhook.Delivery
+
+	// TrustSession accepts the X-Privasys-Sub header as the caller's
+	// identity. It is true on the platform, where the runtime strips the
+	// header from every inbound request before asserting it, and false
+	// everywhere else, where anybody could write it.
+	TrustSession bool
+	// WebDir holds the built browser UI. Empty, the register serves its
+	// API and nothing to look at.
+	WebDir string
+	// ClientID, when set, is the identity-provider client the console
+	// signs in as, in place of the one built into the page.
+	ClientID string
 }
 
 // NewServer builds the HTTP surface in its unconfigured state.
@@ -100,6 +118,8 @@ func (s *Server) Handler() http.Handler {
 	// Always available: the readiness probe, the build version, the
 	// manifest, and the configure call itself.
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /readiness", s.readiness)
+	mux.HandleFunc("GET /app-config.js", s.appConfig)
 	mux.HandleFunc("GET /version", s.version)
 	mux.HandleFunc("GET /privasys.json", s.manifest)
 	mux.HandleFunc("POST /configure", s.configure)
@@ -107,7 +127,18 @@ func (s *Server) Handler() http.Handler {
 	// The register proper.
 	mux.HandleFunc("GET /api/v1/status", s.wrap(s.status))
 	mux.HandleFunc("GET /api/v1/pack", s.wrap(s.packDocument))
-	mux.HandleFunc("GET /api/v1/me", s.wrap(s.me))
+	mux.HandleFunc("GET /api/v1/me", s.wrapCaller(s.me))
+
+	// Membership. The first two answer a person who holds no role yet:
+	// an invitation is how they come to hold one.
+	mux.HandleFunc("POST /api/v1/invites/{id}/check", s.wrapCaller(s.checkInvite))
+	mux.HandleFunc("POST /api/v1/invites/{id}/redeem", s.wrapCaller(s.redeemInvite))
+	mux.HandleFunc("GET /api/v1/invites", s.wrap(s.listInvites))
+	mux.HandleFunc("POST /api/v1/invites", s.wrap(s.createInvite))
+	mux.HandleFunc("DELETE /api/v1/invites/{id}", s.wrap(s.revokeInvite))
+	mux.HandleFunc("GET /api/v1/members", s.wrap(s.listMembers))
+	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
+	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
 
 	mux.HandleFunc("GET /api/v1/records", s.wrap(s.listRecords))
 	mux.HandleFunc("GET /api/v1/records/{id}", s.wrap(s.getRecord))
@@ -164,7 +195,7 @@ func (s *Server) Handler() http.Handler {
 
 	registerExplorer(mux, s)
 
-	return logging(s.log, mux)
+	return logging(s.log, securityHeaders(mux))
 }
 
 // -- request plumbing ------------------------------------------------------
@@ -176,6 +207,12 @@ type request struct {
 	r   *http.Request
 	reg *register.Register
 	p   *auth.Principal
+	// id and tenant are who is calling, before any role is considered.
+	id     *auth.Identity
+	tenant string
+	// refusal is why the caller holds no principal, on the routes that
+	// admit such a caller.
+	refusal error
 }
 
 type handler func(*request) (any, error)
@@ -193,12 +230,23 @@ func (s *Server) wrap(h handler) http.HandlerFunc {
 				fmt.Sprintf("register is %s", state), failure)
 			return
 		}
-		principal, err := authenticate(r, reg, verifier)
+		id, tenant, err := s.identify(r, reg, verifier)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "not authenticated", err.Error())
 			return
 		}
-		result, err := h(&request{w: w, r: r, reg: reg, p: principal})
+		principal, err := reg.Pack().Model().Resolve(id, tenant, actingRole(r))
+		if errors.Is(err, auth.ErrNoRole) {
+			// Known, and not a member: a different answer from not
+			// being known at all, so the page can say what to do next.
+			writeError(w, http.StatusForbidden, "no register role", err.Error())
+			return
+		}
+		if err != nil {
+			writeError(w, http.StatusForbidden, "not authorised", err.Error())
+			return
+		}
+		result, err := h(&request{w: w, r: r, reg: reg, p: principal, id: id, tenant: tenant})
 		if err != nil {
 			status, detail := classify(err)
 			writeError(w, status, err.Error(), detail)
@@ -212,24 +260,94 @@ func (s *Server) wrap(h handler) http.HandlerFunc {
 	}
 }
 
-func authenticate(r *http.Request, reg *register.Register, verifier auth.Verifier) (*auth.Principal, error) {
-	header := r.Header.Get("Authorization")
-	if !strings.HasPrefix(header, "Bearer ") {
-		return nil, errors.New("a bearer token is required")
+// wrapCaller admits anyone the register can identify, whether or not
+// they hold a role: the handler gets a nil principal for a caller who
+// holds none. It is for the two things such a person can do, which are
+// to learn that, and to redeem an invitation.
+func (s *Server) wrapCaller(h handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reg, verifier, ready := s.register()
+		if !ready {
+			s.mu.RLock()
+			state, failure := s.state, s.failure
+			s.mu.RUnlock()
+			writeError(w, http.StatusServiceUnavailable,
+				fmt.Sprintf("register is %s", state), failure)
+			return
+		}
+		id, tenant, err := s.identify(r, reg, verifier)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "not authenticated", err.Error())
+			return
+		}
+		req := &request{w: w, r: r, reg: reg, id: id, tenant: tenant}
+		req.p, req.refusal = reg.Pack().Model().Resolve(id, tenant, actingRole(r))
+		if req.refusal != nil {
+			req.p = nil
+		}
+		result, err := h(req)
+		if err != nil {
+			status, detail := classify(err)
+			writeError(w, status, err.Error(), detail)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
 	}
-	id, err := verifier.Verify(r.Context(), strings.TrimPrefix(header, "Bearer "))
-	if err != nil {
-		return nil, err
+}
+
+// identify works out who is calling, and loads the roles this register
+// granted them.
+func (s *Server) identify(r *http.Request, reg *register.Register, verifier auth.Verifier) (*auth.Identity, string, error) {
+	var id *auth.Identity
+	if sub := strings.TrimSpace(r.Header.Get("X-Privasys-Sub")); s.TrustSession && sub != "" {
+		if len(sub) > 256 {
+			return nil, "", errors.New("the session subject is malformed")
+		}
+		id = &auth.Identity{Sub: sub, Issuer: "privasys-session"}
+	} else {
+		header := r.Header.Get("Authorization")
+		if !strings.HasPrefix(header, "Bearer ") {
+			return nil, "", errors.New("sign in, or present a bearer token")
+		}
+		var err error
+		if id, err = verifier.Verify(r.Context(), strings.TrimPrefix(header, "Bearer ")); err != nil {
+			return nil, "", err
+		}
 	}
 	tenant := r.Header.Get("X-Register-Tenant")
 	if tenant == "" {
 		tenant = reg.Options().Tenant
 	}
-	role := r.Header.Get("X-Register-Role")
-	if role == "" {
-		role = r.URL.Query().Get("role")
+	granted, display, err := reg.GrantedRoles(tenant, id.Sub)
+	if err != nil {
+		return nil, "", fmt.Errorf("membership lookup: %w", err)
 	}
-	return reg.Pack().Model().Resolve(id, tenant, role)
+	id.Granted = granted
+	if id.Display == "" {
+		id.Display = display
+	}
+	return id, tenant, nil
+}
+
+func actingRole(r *http.Request) string {
+	if role := r.Header.Get("X-Register-Role"); role != "" {
+		return role
+	}
+	return r.URL.Query().Get("role")
+}
+
+// securityHeaders are set on everything, the browser shell included.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		// The platform edge has no plain-HTTP listener, so an address typed
+		// without https:// fails; after one visit the browser upgrades itself.
+		h.Set("Strict-Transport-Security", "max-age=31536000")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // classify maps a core error onto a status code. The core returns plain
@@ -243,6 +361,8 @@ func classify(err error) (int, string) {
 	}
 	text := err.Error()
 	switch {
+	case errors.Is(err, register.ErrInvite):
+		return http.StatusGone, ""
 	case strings.Contains(text, "may not"), strings.Contains(text, "separation of duties"),
 		strings.Contains(text, "is not a proposing role"), strings.Contains(text, "only the proposer"),
 		strings.Contains(text, "only ") && strings.Contains(text, "can answer"):
@@ -254,7 +374,8 @@ func classify(err error) (int, string) {
 		strings.HasPrefix(text, "no key for scope"):
 		return http.StatusNotFound, ""
 	case strings.Contains(text, "already registered"), strings.Contains(text, "already been erased"),
-		strings.Contains(text, "is not awaiting"), strings.Contains(text, "is not waiting"):
+		strings.Contains(text, "is not awaiting"), strings.Contains(text, "is not waiting"),
+		strings.Contains(text, "is the only member"):
 		return http.StatusConflict, ""
 	default:
 		return http.StatusBadRequest, ""

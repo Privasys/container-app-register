@@ -141,3 +141,60 @@ footer {
 }
 
 .error { color: var(--bad); }
+
+/* -- shell ---------------------------------------------------------------- */
+
+header h1 { display: flex; align-items: center; gap: 10px; }
+img.mark { width: 20px; height: 20px; }
+
+#identity { align-items: center; }
+#identity .who { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+#identity .role {
+  font-size: 12px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 999px;
+}
+
+footer { display: flex; justify-content: space-between; gap: 16px; }
+footer .foot { display: flex; gap: 16px; white-space: nowrap; }
+footer a { color: var(--accent); }
+
+.heading {
+  margin: 26px 0 8px; font-size: 13px; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--muted);
+}
+
+.entry.static { cursor: default; }
+.entry.static .who button { margin-left: 10px; padding: 2px 8px; font-size: 12px; }
+
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+button:disabled { opacity: 0.6; cursor: default; }
+
+/* -- the gate: sign-in, the development stand-in, and "no role yet" ------- */
+
+.gate { position: fixed; inset: 0; z-index: 40; background: var(--bg); overflow: auto; }
+.gate-card { z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.gate-hint {
+  position: fixed; top: 24px; left: 50%; transform: translateX(-50%); z-index: 50;
+  pointer-events: none; padding: 10px 16px; font-size: 13.5px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 12%);
+}
+
+.card {
+  display: flex; flex-direction: column; gap: 10px; width: 100%; max-width: 460px;
+  margin: 0; padding: 28px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.card img.mark { width: 32px; height: 32px; }
+.card h1 { margin: 0; font-size: 20px; letter-spacing: -0.01em; }
+.card p { margin: 0; }
+.card .note { margin: 0; }
+.card pre { white-space: pre-wrap; word-break: break-all; }
+.card #status-line:empty { display: none; }
+
+.label {
+  font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted);
+}
+
+.personas { display: flex; flex-wrap: wrap; gap: 6px; }
+.personas button { font-family: var(--mono); font-size: 12px; padding: 3px 8px; }

@@ -20,9 +20,32 @@ authorises the caller before it lets the call through.
   "pack_ref": "car-register",
   "commitment_key": "<64 hex characters, optional>",
   "checkpoint_interval": "24h",
-  "customer_kek": { "id": "ministry-2026", "algo": "x25519", "public_key": "<base64>" }
+  "customer_kek": { "id": "ministry-2026", "algo": "x25519", "public_key": "<base64>" },
+  "admin_invite": true
 }
 ```
+
+### The first administrator
+
+People sign in with their wallet, and the subject the register sees for
+a person is its own, so the deployer cannot name the first
+administrator in advance. `"admin_invite": true` makes the configure
+call answer with a link:
+
+```json
+{ "status": "configured", "admin_role": "operator", "admin_invite": "/#/join/<id>/<secret>" }
+```
+
+Open it on the register's own address, sign in, and accept. The link
+works once and for 24 hours. It is minted only while nobody administers
+the register, so the field can stay in the stored configuration across
+restarts without issuing a new link each time.
+
+A later configure call on a running register changes nothing about the
+pack, the tenant or the key. It can still name administrators, with
+`admins` (comma-separated subjects, as the register shows them on the
+page of a signed-in person who holds no role yet) or another
+`admin_invite` if every administrator has been removed.
 
 A pack can also be delivered inline as `pack`, which is how a register
 for a domain other than the one baked into the image is brought up
@@ -32,7 +55,7 @@ without rebuilding.
 
 Delivering it makes the key that binds the whole state something that
 arrives over an attested channel and lives only in memory. The register
-publishes SHA-256 of it at OID `1.3.6.1.4.1.65230.3.5.1`, so a
+publishes SHA-256 of it at OID `1.3.6.1.4.1.65230.5.4.1`, so a
 verifying client confirms the register was given the key it expects
 without the key leaving the enclave. The cost is that the register
 cannot start unattended: the gate re-arms on restart, so the key must
