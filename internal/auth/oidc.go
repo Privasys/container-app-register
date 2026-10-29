@@ -42,6 +42,12 @@ type Identity struct {
 	// asserted. The API layer fills it in from the member table.
 	Granted []string
 	Claims  map[string]any
+	// Assurance is how the person signed in, as the runtime reports it on
+	// a direct adopter name: "verified" when the wallet checked this
+	// enclave's attestation before signing in, "unverified" for a passkey
+	// or a federated (social, enterprise) sign-in. Empty when the leg
+	// carries no such statement (sealed session, bearer token).
+	Assurance string
 }
 
 // Verifier validates a bearer token.

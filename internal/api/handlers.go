@@ -67,6 +67,13 @@ func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
 		"appHost": host, "environment": env, "version": s.Version, "name": s.Name,
 		"session": s.TrustSession,
 	}
+	// A direct adopter name: TLS ended in the enclave with a public
+	// certificate, so the page signs in with a federated identity and sends
+	// an app token over its own origin instead of opening a sealed session.
+	// The runtime stamps the transport; a client cannot set this header.
+	if r.Header.Get("X-Privasys-Transport") == "direct" {
+		doc["direct"] = true
+	}
 	if s.ClientID != "" {
 		doc["clientId"] = s.ClientID
 	}
@@ -217,6 +224,9 @@ func (s *Server) me(req *request) (any, error) {
 		"register": map[string]any{
 			"name": req.reg.Options().Name, "pack": pk.Name, "title": pk.Title,
 		},
+	}
+	if req.id.Assurance != "" {
+		out["assurance"] = req.id.Assurance
 	}
 	if req.p == nil {
 		out["status"] = "no_role"

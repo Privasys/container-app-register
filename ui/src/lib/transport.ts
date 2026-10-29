@@ -22,7 +22,7 @@ export class ApiError extends Error {
 }
 
 export interface Transport {
-    kind: 'sealed' | 'dev';
+    kind: 'sealed' | 'direct' | 'dev';
     /** The sealed session behind a sealed transport (its liveness is what
      *  the footer shows and what recovery follows). */
     session?: SealedSession;
@@ -87,6 +87,56 @@ export function sealedTransport(session: SealedSession, role: () => string): Tra
                 throw new ApiError(401, 'The secure session is being re-established. Try again in a moment.');
             }
             if (res.status < 200 || res.status >= 300) throw errorOf(res.status, parsed);
+            return parsed as T;
+        }
+    };
+}
+
+/** Seconds before expiry at which a cached app token is renewed. */
+const TOKEN_RENEWAL_MARGIN_S = 60;
+
+function tokenExpiry(token: string): number {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: number };
+        return typeof payload.exp === 'number' ? payload.exp : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/** On a direct adopter name the page talks to its own origin over TLS that
+ *  ends in the enclave. It carries a privasys.id token minted for this app;
+ *  the runtime verifies it and tells the register who is calling, and how
+ *  they signed in. The token is renewed from the auth frame shortly before
+ *  it expires, and once more if the enclave refuses it. */
+export function bearerTransport(mint: () => Promise<string>, role: () => string): Transport {
+    let token = '';
+    let expiresAt = 0;
+    async function current(force = false): Promise<string> {
+        const now = Math.floor(Date.now() / 1000);
+        if (force || !token || expiresAt - now < TOKEN_RENEWAL_MARGIN_S) {
+            token = await mint();
+            expiresAt = tokenExpiry(token);
+        }
+        return token;
+    }
+    async function send(method: string, path: string, body: unknown, bearer: string): Promise<Response> {
+        return fetch(withRole(path, role()), {
+            method,
+            headers: {
+                Authorization: `Bearer ${bearer}`,
+                ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
+            },
+            body: body !== undefined ? JSON.stringify(body) : undefined
+        });
+    }
+    return {
+        kind: 'direct',
+        async request<T>(method: string, path: string, body?: unknown): Promise<T> {
+            let res = await send(method, path, body, await current());
+            if (res.status === 401) res = await send(method, path, body, await current(true));
+            const parsed = parseBody(new Uint8Array(await res.arrayBuffer()));
+            if (!res.ok) throw errorOf(res.status, parsed);
             return parsed as T;
         }
     };

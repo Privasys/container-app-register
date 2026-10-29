@@ -16,6 +16,11 @@ declare global {
             /** Whether the register is on the platform, where people sign in
              *  with their wallet and every request is sealed. */
             session?: boolean;
+            /** Whether this page was served on a direct adopter name: TLS
+             *  ended in the enclave with a public certificate, so people sign
+             *  in with a federated identity and the page sends an app token
+             *  over its own origin. */
+            direct?: boolean;
         };
     }
 }
@@ -23,9 +28,14 @@ declare global {
 const runtime = window.__REGISTER__;
 const onTest = runtime ? runtime.environment === 'test' : location.hostname.endsWith('.test.privasys.org');
 
-/** On the platform people sign in with their wallet. Anywhere else the
- *  register is a development instance and takes a stand-in token. */
-export const sealed = runtime?.session === true;
+/** On a direct adopter name the enclave ended TLS itself; the runtime
+ *  identifies the caller from a privasys.id token for this app. */
+export const direct = runtime?.session === true && runtime?.direct === true;
+
+/** On the platform's own hostname people sign in with their wallet and
+ *  every request is sealed. Anywhere else the register is a development
+ *  instance and takes a stand-in token. */
+export const sealed = runtime?.session === true && !direct;
 
 export const authConfig = {
     apiBase: onTest ? 'https://api-test.privasys.org' : 'https://api.privasys.org',
@@ -43,6 +53,7 @@ export const appVersion = runtime?.version ?? 'dev';
 export const instanceName = runtime?.name ?? 'register';
 
 /** Where anyone can check the attestation of the enclave serving this page. */
-export const verifyUrl = sealed
-    ? `https://explorer.privasys.org/?app=${encodeURIComponent(authConfig.appHost.split('.')[0])}${onTest ? '&env=test' : ''}`
-    : '';
+export const verifyUrl =
+    sealed || direct
+        ? `https://explorer.privasys.org/?app=${encodeURIComponent(authConfig.appHost.split('.')[0])}${onTest ? '&env=test' : ''}`
+        : '';

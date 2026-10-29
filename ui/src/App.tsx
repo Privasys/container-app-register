@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { appVersion, sealed, verifyUrl } from './lib/config';
+import { appVersion, direct, sealed, verifyUrl } from './lib/config';
 import { SessionProvider, useSession } from './lib/session';
 import type { Pack } from './lib/types';
 import { StatusContext, short, useRun, type StatusLine } from './lib/ui';
@@ -106,8 +106,14 @@ function Shell() {
                 </span>
                 <span className="foot">
                     {SESSION_NOTE[sessionState.status] && <span className="error">{SESSION_NOTE[sessionState.status]}</span>}
-                    <span>{transport.kind === 'sealed' ? 'Sealed to the enclave' : 'Development instance, not sealed'}</span>
-                    {sealed && verifyUrl && (
+                    <span>
+                        {transport.kind === 'sealed'
+                            ? 'Sealed to the enclave'
+                            : transport.kind === 'direct'
+                              ? 'Direct to the enclave'
+                              : 'Development instance, not sealed'}
+                    </span>
+                    {(sealed || direct) && verifyUrl && (
                         <a href={verifyUrl} target="_blank" rel="noreferrer">
                             Verify this register
                         </a>

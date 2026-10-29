@@ -223,8 +223,21 @@ shows who made someone a registrar.
   person, and the last person who can manage membership cannot be
   removed.
 
+On a **direct adopter name** (the owner's own hostname, where TLS ends in
+the enclave with a publicly trusted certificate and the gateway only
+splices), the wallet is not required. The console signs the person in
+with a federated identity through the same Privasys ID frame, asks it
+for a token whose audience is the page's own host, and sends that over
+its own origin. The runtime verifies the token, replaces it with
+`X-Privasys-Sub` and `X-Privasys-Attestation-Level` (`verified` for the
+wallet, `unverified` otherwise), and the register records that level on
+the identity (`assurance` in `/api/v1/me`), so a pack can keep its
+consequential workflows wallet-only. The manifest opts in with
+`surfaces.direct: "private"`; the page learns it is on a direct name from
+`/app-config.js`.
+
 Machines keep the other door: a bearer token from the identity
-provider, whose roles the pack maps with `oidc_roles`. Both doors lead
+provider, whose roles the pack maps with `oidc_roles`. All doors lead
 to the same role model.
 
 ## The console
