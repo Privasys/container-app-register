@@ -9,9 +9,9 @@
 // console down on a transport blip.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { authConfig, sealed } from './config';
+import { authConfig, direct, sealed } from './config';
 import type { AuthFrame, SealedSessionState } from './privasys';
-import { ApiError, devTransport, sealedTransport, type Transport } from './transport';
+import { ApiError, bearerTransport, devTransport, sealedTransport, type Transport } from './transport';
 import type { Me } from './types';
 
 interface SessionValue {
@@ -66,6 +66,23 @@ const PITCH = {
     ]
 };
 
+/** On a direct adopter name the page's own TLS ends in the enclave, and
+ *  people sign in with an identity they already have. */
+const DIRECT_PITCH = {
+    title: 'A register that can prove what it holds.',
+    description:
+        'Every change is a signed transaction with an author and a reason. Every record comes with a proof ' +
+        'you can check in your own browser, against a root the register cannot quietly rewrite.',
+    bullets: [
+        'Your connection ends inside the enclave: the network and the host see only ciphertext.',
+        'The page you are about to use is part of the measured build, and anyone can check which build that is.',
+        'Sign in with your work account.'
+    ]
+};
+
+/** The register runs on the platform, under one of its two sign-in modes. */
+const onPlatform = sealed || direct;
+
 type Phase = 'dev-pick' | 'connecting' | 'ready' | 'error';
 
 const OK: SealedSessionState = { status: 'ok' };
@@ -84,7 +101,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const connecting = useRef(false);
     const recovering = useRef(false);
     const roleRef = useRef(stored(ROLE_KEY));
-    const [phase, setPhase] = useState<Phase>(sealed || stored(TOKEN_KEY) ? 'connecting' : 'dev-pick');
+    const [phase, setPhase] = useState<Phase>(onPlatform || stored(TOKEN_KEY) ? 'connecting' : 'dev-pick');
     const [error, setError] = useState('');
     const [transport, setTransport] = useState<Transport | null>(null);
     const [me, setMe] = useState<Me | null>(null);
@@ -116,12 +133,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // Signing in is all the register asks for. Who a person is to
             // the register is the role someone granted them here.
             scope: ['openid', 'offline_access'],
-            sessionRelay: { appHost: authConfig.appHost },
             container: gateRef.current ?? undefined,
             presentation: 'page',
-            methods: ['wallet'],
-            pitch: { ...PITCH, logoUrl },
-            app: { displayName: 'Register', logoUrl }
+            app: { displayName: 'Register', logoUrl },
+            // On the platform hostname the wallet opens a sealed session to
+            // the enclave. On a direct adopter name TLS already ends in the
+            // enclave, so a federated sign-in suffices: the page then sends
+            // an app token over its own origin and the runtime identifies
+            // the caller.
+            ...(direct
+                ? { methods: ['social'] as const, pitch: { ...DIRECT_PITCH, logoUrl } }
+                : {
+                      sessionRelay: { appHost: authConfig.appHost },
+                      methods: ['wallet'] as const,
+                      pitch: { ...PITCH, logoUrl }
+                  })
         });
         frameRef.current = f;
         return f;
@@ -142,6 +168,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     if (!res.session) throw new Error('The secure session could not be established.');
                     t = sealedTransport(res.session, () => roleRef.current);
                     setSessionState(res.session.state);
+                } else if (direct) {
+                    const f = frame();
+                    await f.connect();
+                    // The token names this page's own host as its audience;
+                    // the runtime accepts it for this app alone.
+                    t = bearerTransport(() => f.getTokenForAudience(location.host), () => roleRef.current);
                 } else {
                     t = devTransport(stored(TOKEN_KEY), () => roleRef.current);
                 }
@@ -155,7 +187,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 setError(describe(e));
                 // A development token that was refused goes back to the
                 // form it came from, which says why.
-                setPhase(sealed ? 'error' : 'dev-pick');
+                setPhase(onPlatform ? 'error' : 'dev-pick');
             } finally {
                 connecting.current = false;
             }
@@ -213,7 +245,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
     const signOut = useCallback(() => {
         store(ROLE_KEY, '');
-        if (!sealed) {
+        if (!onPlatform) {
             store(TOKEN_KEY, '');
             location.reload();
             return;
@@ -227,7 +259,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         [transport, me, role, setRole, sessionState, refreshMe, signOut]
     );
 
-    const gateShown = sealed && (phase !== 'ready' || reapproving);
+    const gateShown = onPlatform && (phase !== 'ready' || reapproving);
 
     return (
         <>
@@ -239,6 +271,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 <div className="gate-hint">
                     Connecting to the register. If your phone shows a Privasys approval request, approve it there.
                 </div>
+            )}
+            {direct && phase === 'connecting' && (
+                <div className="gate-hint">Connecting to the register. Sign in with your work account when asked.</div>
             )}
             {phase === 'error' && (
                 <div className="gate gate-card">

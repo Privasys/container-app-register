@@ -57,6 +57,10 @@ export interface AuthFrame {
      *  is `reapproval-required` or `signed-out`: the same session object
      *  keeps working afterwards. */
     connect(options?: { container?: HTMLElement }): Promise<ConnectResult>;
+    /** An access token for one audience (an app's hostname or `app:<id>`),
+     *  minted from the signed-in session; the runtime on a direct name
+     *  accepts it for that app only. Requires a session: after `connect()`. */
+    getTokenForAudience(audience: string): Promise<string>;
     clearSession(): Promise<void>;
     cancel(): void;
     destroy(): void;

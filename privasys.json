@@ -6,6 +6,18 @@
     "configure": {
         "readiness_path": "/readiness"
     },
+    "surfaces": {
+        "static": [
+            "/",
+            "/app-config.js",
+            "/assets/",
+            "/vendor/",
+            "/brand/",
+            "/favicon.svg",
+            "/openapi.yaml"
+        ],
+        "direct": "private"
+    },
     "tools": [
         {
             "name": "configure",
@@ -18,39 +30,54 @@
                     "tenant": {
                         "type": "string",
                         "description": "The tenant this register serves.",
-                        "x-privasys": { "label": "Tenant" }
+                        "x-privasys": {
+                            "label": "Tenant"
+                        }
                     },
                     "pack_ref": {
                         "type": "string",
                         "description": "The name of a schema pack baked into the image. Use 'car-register' for the vehicle register shipped with this build.",
-                        "x-privasys": { "label": "Schema pack" }
+                        "x-privasys": {
+                            "label": "Schema pack"
+                        }
                     },
                     "commitment_key": {
                         "type": "string",
                         "description": "The ledger commitment key, 64 hex characters. Leave empty to have the register derive one from its sealed master secret.",
-                        "x-privasys": { "secret": true, "label": "Commitment key" }
+                        "x-privasys": {
+                            "secret": true,
+                            "label": "Commitment key"
+                        }
                     },
                     "admin_invite": {
                         "type": "boolean",
                         "description": "Return a single-use link, valid 24 hours, that gives whoever opens it and signs in the role that manages membership. Use it for the first administrator: the subject the register sees for a person is its own, not their platform identity, so it cannot be named in advance. Ignored once somebody administers the register, so it is safe to leave set across restarts.",
-                        "x-privasys": { "label": "Administrator invitation" }
+                        "x-privasys": {
+                            "label": "Administrator invitation"
+                        }
                     },
                     "admins": {
                         "type": "string",
                         "description": "Comma-separated subjects, as this register sees them, to grant the role that manages membership. For people who have already signed in and read their identifier off the page.",
-                        "x-privasys": { "label": "Administrators" }
+                        "x-privasys": {
+                            "label": "Administrators"
+                        }
                     },
                     "admin_role": {
                         "type": "string",
                         "description": "The role an administrator is given. Defaults to the first role in the pack that may manage members.",
-                        "x-privasys": { "label": "Administrator role" }
+                        "x-privasys": {
+                            "label": "Administrator role"
+                        }
                     },
                     "checkpoint_interval": {
                         "type": "string",
                         "description": "How often a root checkpoint is issued on a quiet register, e.g. 24h."
                     }
                 },
-                "required": ["tenant"]
+                "required": [
+                    "tenant"
+                ]
             }
         },
         {
@@ -64,15 +91,22 @@
                     "class": {
                         "type": "string",
                         "description": "The record class, e.g. vehicle or plate.",
-                        "x-privasys": { "label": "Class" }
+                        "x-privasys": {
+                            "label": "Class"
+                        }
                     },
                     "natural_key": {
                         "type": "string",
                         "description": "The natural key: a VIN, a plate number.",
-                        "x-privasys": { "label": "Key" }
+                        "x-privasys": {
+                            "label": "Key"
+                        }
                     }
                 },
-                "required": ["class", "natural_key"]
+                "required": [
+                    "class",
+                    "natural_key"
+                ]
             }
         },
         {
@@ -83,14 +117,34 @@
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "workflow": { "type": "string", "description": "The workflow to start." },
-                    "object_id": { "type": "string", "description": "The record the proposal is about; omit for a workflow that creates one." },
-                    "payload": { "type": "object", "description": "The proposed record body, or the workflow's declared input." },
-                    "evidence": { "type": "object", "description": "Required document digests, as SHA-256 in lower-case hex. The register records the digest, never the document." },
-                    "message": { "type": "string", "description": "Commit summary, at most 72 characters." },
-                    "body": { "type": "string", "description": "The long-form part of the commit message." }
+                    "workflow": {
+                        "type": "string",
+                        "description": "The workflow to start."
+                    },
+                    "object_id": {
+                        "type": "string",
+                        "description": "The record the proposal is about; omit for a workflow that creates one."
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": "The proposed record body, or the workflow's declared input."
+                    },
+                    "evidence": {
+                        "type": "object",
+                        "description": "Required document digests, as SHA-256 in lower-case hex. The register records the digest, never the document."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Commit summary, at most 72 characters."
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "The long-form part of the commit message."
+                    }
                 },
-                "required": ["workflow"]
+                "required": [
+                    "workflow"
+                ]
             }
         },
         {
@@ -101,10 +155,18 @@
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "class": { "type": "string" },
-                    "object_id": { "type": "string" },
-                    "kind": { "type": "string" },
-                    "limit": { "type": "integer" }
+                    "class": {
+                        "type": "string"
+                    },
+                    "object_id": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "type": "string"
+                    },
+                    "limit": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -116,10 +178,18 @@
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "The query name." },
-                    "params": { "type": "object", "description": "Typed parameters for the query." }
+                    "name": {
+                        "type": "string",
+                        "description": "The query name."
+                    },
+                    "params": {
+                        "type": "object",
+                        "description": "Typed parameters for the query."
+                    }
                 },
-                "required": ["name"]
+                "required": [
+                    "name"
+                ]
             }
         },
         {
@@ -127,7 +197,10 @@
             "role": "status",
             "description": "The register's position: ledger root and version, transaction and record counts, proposals awaiting action, pruned versions, destroyed keys, and the last signed checkpoint.",
             "endpoint": "/tools/status",
-            "inputSchema": { "type": "object", "properties": {} }
+            "inputSchema": {
+                "type": "object",
+                "properties": {}
+            }
         },
         {
             "name": "checkpoint",
@@ -137,7 +210,10 @@
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "reason": { "type": "string", "description": "Why this checkpoint is being issued." }
+                    "reason": {
+                        "type": "string",
+                        "description": "Why this checkpoint is being issued."
+                    }
                 }
             }
         }

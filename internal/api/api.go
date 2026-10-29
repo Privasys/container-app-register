@@ -304,6 +304,12 @@ func (s *Server) identify(r *http.Request, reg *register.Register, verifier auth
 			return nil, "", errors.New("the session subject is malformed")
 		}
 		id = &auth.Identity{Sub: sub, Issuer: "privasys-session"}
+		// On a direct name the runtime also says how the person signed in.
+		// Only the two values it defines are kept; anything else is noise.
+		switch level := r.Header.Get("X-Privasys-Attestation-Level"); level {
+		case "verified", "unverified":
+			id.Assurance = level
+		}
 	} else {
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {

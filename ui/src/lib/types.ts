@@ -15,6 +15,10 @@ export interface Me {
     display?: string;
     tenant: string;
     refusal?: string;
+    /** How the person signed in, on a direct name: `verified` by the wallet
+     *  after it checked this enclave's attestation, or `unverified` for a
+     *  passkey or federated sign-in. Absent on other legs. */
+    assurance?: 'verified' | 'unverified';
     register: { name: string; pack: string; title?: string };
     principal?: Principal;
     permissions?: string[];
