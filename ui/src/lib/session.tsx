@@ -76,7 +76,7 @@ const DIRECT_PITCH = {
     bullets: [
         'Your connection ends inside the enclave: the network and the host see only ciphertext.',
         'The page you are about to use is part of the measured build, and anyone can check which build that is.',
-        'Sign in with your work account.'
+        'Sign in with your work account, or with a Privasys ID.'
     ]
 };
 
@@ -142,7 +142,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // an app token over its own origin and the runtime identifies
             // the caller.
             ...(direct
-                ? { methods: ['social'] as const, ...(signInProviders.length ? { providers: signInProviders } : {}), pitch: { ...DIRECT_PITCH, logoUrl } }
+                ? { methods: ['social', 'passkey'] as const, ...(signInProviders.length ? { providers: signInProviders } : {}), pitch: { ...DIRECT_PITCH, logoUrl } }
                 : {
                       sessionRelay: { appHost: authConfig.appHost },
                       methods: ['wallet'] as const,
@@ -273,7 +273,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 </div>
             )}
             {direct && phase === 'connecting' && (
-                <div className="gate-hint">Connecting to the register. Sign in with your work account when asked.</div>
+                <div className="gate-hint">Connecting to the register. Sign in with your work account, or your Privasys ID, when asked.</div>
             )}
             {phase === 'error' && (
                 <div className="gate gate-card">
