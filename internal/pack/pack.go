@@ -102,6 +102,10 @@ func (c *Class) Compiled() *jsonschema.Schema { return c.compiled }
 // project into.
 func (c *Class) QueryTable() string { return "q_" + c.Name }
 
+// reservedColumns are the columns every query table carries on its own,
+// which a projection may not shadow.
+var reservedColumns = map[string]bool{"object_id": true, "tenant": true, "status": true, "updated_at": true}
+
 // Encryption scopes.
 const (
 	EncNone    = "none"
@@ -351,6 +355,10 @@ func (p *Pack) validate() error {
 		for _, proj := range compiled.Projections() {
 			if !nameRe.MatchString(proj.Column) {
 				return fmt.Errorf("pack: class %q column %q must match %s", c.Name, proj.Column, nameRe)
+			}
+			if reservedColumns[proj.Column] {
+				return fmt.Errorf("pack: class %q property %q projects to column %q, which the query table reserves; "+
+					"give it another name with x-register.column", c.Name, proj.Property, proj.Column)
 			}
 			if prop := compiled.Properties[proj.Property]; prop.Register.PII {
 				return fmt.Errorf("pack: class %q property %q is personal data and cannot be queryable: "+

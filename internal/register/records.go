@@ -196,7 +196,18 @@ func (r *Register) previousNaturalKey(tx *store.Tx, objectID string) (string, er
 func (r *Register) projectionOps(class *pack.Class, tenant, objectID, status string, at int64, clear map[string]any) model.WriteOp {
 	values := map[string]any{"tenant": tenant, "status": status, "updated_at": at}
 	for _, p := range class.Compiled().Projections() {
-		values[p.Column] = projectValue(p.Type, clear[p.Property])
+		v := clear[p.Property]
+		if p.Member != "" {
+			// An envelope projects one member; an envelope that is absent
+			// or lacks the member projects the column's zero value, as an
+			// absent scalar property does.
+			if obj, ok := v.(map[string]any); ok {
+				v = obj[p.Member]
+			} else {
+				v = nil
+			}
+		}
+		values[p.Column] = projectValue(p.Type, v)
 	}
 	return model.WriteOp{
 		Table:  class.QueryTable(),

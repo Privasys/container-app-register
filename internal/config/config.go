@@ -87,11 +87,21 @@ type Config struct {
 	// WebDir is where the built browser UI lives in the image.
 	WebDir string
 
+	// SiteDir is where an adopter site lives, when the image carries
+	// one: public pages, single-page shells and static files served in
+	// front of the register, with the console moved to /console.
+	SiteDir string
+
 	// ClientID is the client the console signs people in as at the
 	// identity provider. It decides which subject the register sees for
 	// a person, and nothing else: a wrong value signs in strangers, it
 	// does not let anyone in.
 	ClientID string
+
+	// SignInProviders narrows the federated identities the console offers
+	// on a direct adopter name, in order (github, google, microsoft,
+	// linkedin). Empty offers every provider the identity provider has.
+	SignInProviders []string
 }
 
 // Modes.
@@ -117,10 +127,20 @@ func Load() (*Config, error) {
 		CommitmentKeyHex:   os.Getenv("REGISTER_COMMITMENT_KEY"),
 		Tenant:             env("REGISTER_TENANT", "default"),
 		WebDir:             env("REGISTER_WEB_DIR", "/web"),
+		SignInProviders:    list(os.Getenv("REGISTER_SIGNIN_PROVIDERS")),
+		SiteDir:            os.Getenv("REGISTER_SITE_DIR"),
 		ClientID:           os.Getenv("REGISTER_CLIENT_ID"),
 		PackPath:           os.Getenv("REGISTER_PACK"),
 		CheckpointInterval: duration("REGISTER_CHECKPOINT_INTERVAL", 24*time.Hour),
 		StandbyInterval:    duration("REGISTER_STANDBY_INTERVAL", 30*time.Second),
+	}
+
+	// An image that carries a site at the conventional place serves it
+	// without being told to.
+	if c.SiteDir == "" {
+		if fi, err := os.Stat("/site"); err == nil && fi.IsDir() {
+			c.SiteDir = "/site"
+		}
 	}
 
 	port := os.Getenv("PORT")
@@ -183,4 +203,15 @@ func duration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// list splits a comma-separated setting, trimming blanks.
+func list(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

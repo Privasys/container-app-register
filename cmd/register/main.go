@@ -75,6 +75,13 @@ func run(log *slog.Logger) error {
 	// The session header is the runtime's to assert. Off the platform
 	// nothing strips it from an inbound request, so it is not believed.
 	server.TrustSession, server.WebDir, server.ClientID = cfg.OnPlatform(), cfg.WebDir, cfg.ClientID
+	server.SignInProviders = cfg.SignInProviders
+	// An adopter site, when the image carries one, is read before the
+	// server listens: a defect in it is a build defect, not a 500.
+	server.SiteDir = cfg.SiteDir
+	if err := server.LoadSite(); err != nil {
+		return err
+	}
 
 	app := &application{cfg: cfg, log: log, material: material, server: server}
 	server.Configure = app.configure
