@@ -376,10 +376,17 @@ are as auditable as the decision.
   "schema": { "type": "object", "properties": {
     "vin":  { "type": "string", "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
               "x-register": { "queryable": true, "unique": true } },
-    "make": { "type": "string", "x-register": { "queryable": true, "indexed": true } }
+    "make": { "type": "string", "x-register": { "queryable": true, "indexed": true } },
+    "colour": { "type": "object",
+                "properties": { "value": { "type": "string" }, "status": { "type": "string" } },
+                "x-register": { "queryable": true, "member": "value" } }
   }}
 }
 ```
+
+A property whose value is an object, such as a record that keeps every
+value in an envelope with its verification status, projects one scalar
+member of it with `member`; the column takes the member's type.
 
 Two rules the loader enforces and will not let you past: a property
 marked as personal data cannot also be queryable, because a query
