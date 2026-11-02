@@ -77,6 +77,9 @@ func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
 	if s.ClientID != "" {
 		doc["clientId"] = s.ClientID
 	}
+	if len(s.SignInProviders) > 0 {
+		doc["providers"] = s.SignInProviders
+	}
 	cfg, _ := json.Marshal(doc)
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")

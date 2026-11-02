@@ -46,6 +46,8 @@ export interface AuthFrameConfig {
     container?: HTMLElement;
     presentation?: 'modal' | 'inline' | 'page';
     methods?: readonly ('wallet' | 'passkey' | 'social')[];
+    /** Narrows the social providers shown, in this order; one provider renders a single button. */
+    providers?: readonly ('github' | 'google' | 'microsoft' | 'linkedin')[];
     pitch?: { title?: string; description?: string; bullets?: string[]; logoUrl?: string };
     app?: { logoUrl?: string; displayName?: string };
     sessionRelay?: { appHost: string };

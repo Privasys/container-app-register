@@ -9,7 +9,7 @@
 // console down on a transport blip.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { authConfig, direct, sealed } from './config';
+import { authConfig, direct, sealed, signInProviders } from './config';
 import type { AuthFrame, SealedSessionState } from './privasys';
 import { ApiError, bearerTransport, devTransport, sealedTransport, type Transport } from './transport';
 import type { Me } from './types';
@@ -142,7 +142,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // an app token over its own origin and the runtime identifies
             // the caller.
             ...(direct
-                ? { methods: ['social'] as const, pitch: { ...DIRECT_PITCH, logoUrl } }
+                ? { methods: ['social'] as const, ...(signInProviders.length ? { providers: signInProviders } : {}), pitch: { ...DIRECT_PITCH, logoUrl } }
                 : {
                       sessionRelay: { appHost: authConfig.appHost },
                       methods: ['wallet'] as const,

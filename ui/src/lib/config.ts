@@ -21,6 +21,9 @@ declare global {
              *  in with a federated identity and the page sends an app token
              *  over its own origin. */
             direct?: boolean;
+            /** Which federated identities the gate offers on a direct name, in
+             *  order. Absent, every provider the identity provider has. */
+            providers?: readonly ('github' | 'google' | 'microsoft' | 'linkedin')[];
         };
     }
 }
@@ -48,6 +51,9 @@ export const authConfig = {
     brokerUrl: 'wss://relay.privasys.org/relay',
     appHost: runtime?.appHost ?? location.host
 };
+
+/** The federated identities offered on a direct name; empty means all. */
+export const signInProviders = runtime?.providers ?? [];
 
 export const appVersion = runtime?.version ?? 'dev';
 export const instanceName = runtime?.name ?? 'register';

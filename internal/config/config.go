@@ -97,6 +97,11 @@ type Config struct {
 	// a person, and nothing else: a wrong value signs in strangers, it
 	// does not let anyone in.
 	ClientID string
+
+	// SignInProviders narrows the federated identities the console offers
+	// on a direct adopter name, in order (github, google, microsoft,
+	// linkedin). Empty offers every provider the identity provider has.
+	SignInProviders []string
 }
 
 // Modes.
@@ -122,6 +127,7 @@ func Load() (*Config, error) {
 		CommitmentKeyHex:   os.Getenv("REGISTER_COMMITMENT_KEY"),
 		Tenant:             env("REGISTER_TENANT", "default"),
 		WebDir:             env("REGISTER_WEB_DIR", "/web"),
+		SignInProviders:    list(os.Getenv("REGISTER_SIGNIN_PROVIDERS")),
 		SiteDir:            os.Getenv("REGISTER_SITE_DIR"),
 		ClientID:           os.Getenv("REGISTER_CLIENT_ID"),
 		PackPath:           os.Getenv("REGISTER_PACK"),
@@ -197,4 +203,15 @@ func duration(key string, fallback time.Duration) time.Duration {
 		return fallback
 	}
 	return d
+}
+
+// list splits a comma-separated setting, trimming blanks.
+func list(v string) []string {
+	var out []string
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

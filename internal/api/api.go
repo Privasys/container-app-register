@@ -88,6 +88,9 @@ type Server struct {
 	// ClientID, when set, is the identity-provider client the console
 	// signs in as, in place of the one built into the page.
 	ClientID string
+	// SignInProviders narrows the federated identities the console offers
+	// on a direct name; empty offers them all.
+	SignInProviders []string
 }
 
 // NewServer builds the HTTP surface in its unconfigured state.
