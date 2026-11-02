@@ -182,7 +182,9 @@ to sign in, so the console offers stand-in personas instead.
 | `PORT` | The host-network port the platform assigns. Required; there is no fallback. |
 | `REGISTER_DATA_DIR` | The sealed volume. Default `/data`. |
 | `REGISTER_WEB_DIR` | Where the built console lives. Default `/web`, which is where the image puts it. |
+| `REGISTER_SITE_DIR` | An adopter site to serve in front of the register (see [Adopter site](#adopter-site)). Default `/site` when that directory exists; otherwise none. |
 | `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. |
+| `REGISTER_SIGNIN_PROVIDERS` | On a direct adopter name, which federated identities the sign-in gate offers, comma-separated and in order (`github`, `google`, `microsoft`, `linkedin`). Empty offers every provider the identity provider has. An adopter whose people all use one work identity sets the one, e.g. `microsoft`. |
 | `REGISTER_OIDC_ISSUER` | Identity provider for bearer tokens. Default `https://privasys.id`. |
 | `REGISTER_OIDC_AUDIENCE` | The audience bearer tokens must carry. |
 | `REGISTER_CHECKPOINT_INTERVAL` | Cadence for scheduled checkpoints. Default `24h`. |
@@ -262,6 +264,78 @@ it — flips the answer, substitutes the root, rewrites the row, forges
 the signature, detaches the anchor, truncates the proof — and requires
 the page to catch each one, naming which check failed and why.
 
+## Adopter site
+
+An image built on the register (`FROM` this image) can put its own
+front door in front of it: public pages rendered from templates at the
+root, single-page shells under prefixes of its choosing, and the static
+files they need. The register's own console moves to `/console`. The
+register knows nothing of the adopter's domain; it serves what the
+site directory declares, and everything under `/api` stays behind the
+same authentication whatever the site says. The site is read once, at
+startup, and any defect in it (a page naming a template that is not
+there, a shell whose index is missing, a path that is the register's
+own) stops the process before it listens, so a broken image fails its
+readiness probe rather than serving half a site.
+
+The site lives in `REGISTER_SITE_DIR` (default `/site` when it exists)
+and is described by `site.json`:
+
+```json
+{
+  "title": "Example Register",
+  "pages": [
+    {"path": "/", "template": "home.html", "title": "Home"},
+    {"path": "/help", "template": "help.html", "title": "Help"}
+  ],
+  "shells": [
+    {"prefix": "/workspace", "index": "app/index.html"},
+    {"prefix": "/operations", "index": "app/index.html"}
+  ],
+  "static": {"prefix": "/static/", "dir": "static"},
+  "console": "/console",
+  "join": "/workspace/join"
+}
+```
+
+- **Pages** are server-rendered with Go's `html/template` and need no
+  JavaScript. Every `*.html` under `templates/` is loaded: files named
+  by a page are page templates, the rest (a `layout.html`, partials) are
+  shared. Each page is parsed on its own copy of the shared set, so
+  pages may each define a `content` block for the layout to place:
+  `{{define "content"}}…{{end}}{{template "layout.html" .}}`. A page
+  receives `.Title`, `.Path`, `.Site` (the site title), `.Pages`,
+  `.Register` (`Name`, `Version`, `State`, and `Title`, the pack's
+  title once configured) and `.Now`. Pages hold no register data and
+  render before the configure gate lifts, like the console shell; they
+  are served `no-cache`.
+- **Shells** answer for their whole prefix: `/workspace`, `/workspace/`
+  and `/workspace/anything` all serve the declared index, `no-cache`,
+  without a redirect, so a browser application routes under it. A shell
+  may not take the root; declare a page for `/` instead.
+- **Static** files are served from the declared directory under the
+  declared prefix: no directory listings, no dotfiles. Files under
+  `app/assets/` and `govuk/` are hashed build output and the vendored
+  design system, served `public, max-age=31536000, immutable`;
+  everything else `no-cache`.
+- **Console**: `GET /console` (or the path named) serves the console
+  shell. Its root-level files (`/assets/`, `/vendor/`, `/brand/`,
+  `/favicon.svg`, `/app-config.js`) stay at the root, so the console
+  build needs no change and the adopter's shells can read
+  `/app-config.js` too.
+- **Join**: when set, invitation links the register hands out (the
+  configure call's administrator invitation, and `POST /api/v1/invites`)
+  land on that page as `<join>/<id>#<secret>` instead of the console's
+  `/#/join/<id>/<secret>`. The secret rides in the fragment either way.
+- With no site, nothing moves: the console takes the root as before.
+
+Paths the register owns (`/health`, `/readiness`, `/configure`,
+`/version`, `/privasys.json`, `/app-config.js`, `/openapi.yaml` and
+the `/api/`, `/tools/`, `/assets/`, `/vendor/`, `/brand/` subtrees)
+cannot be declared by a site. The adopter image declares which of its
+paths are readable without a session in its own manifest; the register
+image's declaration covers only the console.
+
 ## The API
 
 [`openapi.yaml`](internal/api/openapi.yaml), also served at
@@ -302,10 +376,17 @@ are as auditable as the decision.
   "schema": { "type": "object", "properties": {
     "vin":  { "type": "string", "pattern": "^[A-HJ-NPR-Z0-9]{17}$",
               "x-register": { "queryable": true, "unique": true } },
-    "make": { "type": "string", "x-register": { "queryable": true, "indexed": true } }
+    "make": { "type": "string", "x-register": { "queryable": true, "indexed": true } },
+    "colour": { "type": "object",
+                "properties": { "value": { "type": "string" }, "status": { "type": "string" } },
+                "x-register": { "queryable": true, "member": "value" } }
   }}
 }
 ```
+
+A property whose value is an object, such as a record that keeps every
+value in an envelope with its verification status, projects one scalar
+member of it with `member`; the column takes the member's type.
 
 Two rules the loader enforces and will not let you past: a property
 marked as personal data cannot also be queryable, because a query

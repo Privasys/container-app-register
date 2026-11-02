@@ -81,7 +81,8 @@ cadence is a poor fit for that promise.
 | `queryable` | Projected into the class's query table so SQL can filter, sort and count on it. |
 | `indexed` | A secondary index on the projected column. |
 | `unique` | A unique index, and a core-level check that gives a readable error before the constraint fires. |
-| `column` | Override the projected column name. |
+| `column` | Override the projected column name. The names `object_id`, `tenant`, `status` and `updated_at` belong to every query table and are refused. |
+| `member` | Project one scalar member of an object-valued property instead of the object. A record that wraps every value in an envelope `{"value": …, "status": …}` sets `"member": "value"`; the column takes the member's type, and an envelope that is absent or lacks the member projects the column's zero value. The property must be an object that declares the member, and the member must be a scalar. |
 | `reference` | The class this property points at. The core enforces the referential rule the SQL layer has no foreign keys for, including against records created earlier in the same write set. |
 
 Two combinations the loader refuses: a property that is both `pii` and

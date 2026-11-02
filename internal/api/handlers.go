@@ -77,6 +77,9 @@ func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
 	if s.ClientID != "" {
 		doc["clientId"] = s.ClientID
 	}
+	if len(s.SignInProviders) > 0 {
+		doc["providers"] = s.SignInProviders
+	}
 	cfg, _ := json.Marshal(doc)
 	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -119,7 +122,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 	// name administrators.
 	if running, _, ready := s.register(); ready {
 		out := map[string]any{"status": "already_configured"}
-		if err := bootstrapMembers(running, body, out); err != nil {
+		if err := s.bootstrapMembers(running, body, out); err != nil {
 			writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
 			return
 		}
@@ -133,7 +136,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"status": "configured"}
-	if err := bootstrapMembers(reg, body, out); err != nil {
+	if err := s.bootstrapMembers(reg, body, out); err != nil {
 		s.Fail(err)
 		writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
 		return
@@ -155,7 +158,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 // already holds the role is left alone, and an invitation is only
 // minted while nobody can manage membership, which is the one moment it
 // is needed.
-func bootstrapMembers(reg *register.Register, document []byte, out map[string]any) error {
+func (s *Server) bootstrapMembers(reg *register.Register, document []byte, out map[string]any) error {
 	var doc struct {
 		Admins      string `json:"admins"`
 		AdminInvite any    `json:"admin_invite"`
@@ -203,7 +206,7 @@ func bootstrapMembers(reg *register.Register, document []byte, out map[string]an
 			if err != nil {
 				return fmt.Errorf("admin invite: %w", err)
 			}
-			out["admin_invite"] = "/#/join/" + inv.ID + "/" + secret
+			out["admin_invite"] = s.inviteLink(inv.ID, secret)
 			out["admin_role"] = role
 		}
 	}
@@ -315,7 +318,7 @@ func (s *Server) createInvite(req *request) (any, error) {
 	}
 	// The secret is served here and nowhere else. It goes in the link's
 	// fragment, which a browser does not send to any server.
-	return map[string]any{"invite": inv, "link": "/#/join/" + inv.ID + "/" + secret}, nil
+	return map[string]any{"invite": inv, "link": s.inviteLink(inv.ID, secret)}, nil
 }
 
 func (s *Server) revokeInvite(req *request) (any, error) {
