@@ -180,7 +180,7 @@ to sign in, so the console offers stand-in personas instead.
 | Variable | Meaning |
 | --- | --- |
 | `PORT` | The host-network port the platform assigns. Required; there is no fallback. |
-| `REGISTER_DATA_DIR` | The sealed volume. Default `/data`. |
+| `REGISTER_DATA_DIR` | The sealed volume. Default `/data`. The store marks the directory with its table layout (`layout` file, currently `2`); a directory written by another layout is refused at startup with a message saying so, because the SQL layer cannot alter columns in place. Start such a register on a fresh directory or restore from an export. |
 | `REGISTER_WEB_DIR` | Where the built console lives. Default `/web`, which is where the image puts it. |
 | `REGISTER_SITE_DIR` | An adopter site to serve in front of the register (see [Adopter site](#adopter-site)). Default `/site` when that directory exists; otherwise none. |
 | `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. |

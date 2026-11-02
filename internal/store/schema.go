@@ -3,7 +3,22 @@
 
 package store
 
-import "fmt"
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+)
+
+// Layout is the version of the table layout this build writes. A data
+// directory written by another layout is refused rather than read
+// wrongly: the SQL layer cannot alter a column in place, so widening
+// the payload columns from BLOB to MEDIUMBLOB (layout 2) made a fresh
+// directory, or a restore from an export, the only way across.
+const Layout = "2"
+
+// layoutFile marks a data directory with the layout that wrote it.
+const layoutFile = "layout"
 
 // The register's base tables. Every one of them is ordinary ledger
 // state: the root commits to the transaction log, the object heads, the
@@ -14,7 +29,9 @@ import "fmt"
 // so referential rules are enforced in the core (see the register
 // package); there are no column defaults, so every INSERT names every
 // column; and there is no DECIMAL, JSON or ENUM, so payloads travel as
-// canonical JSON in BLOB columns and timestamps as Unix seconds.
+// canonical JSON in MEDIUMBLOB columns (a BLOB holds 64 KiB, and a
+// class schema generated from a large field scheme runs to several
+// hundred) and timestamps as Unix seconds.
 var baseTables = []tableDDL{
 	{
 		name: "transactions",
@@ -34,8 +51,8 @@ var baseTables = []tableDDL{
 			root_before CHAR(64) NOT NULL,
 			version_before BIGINT UNSIGNED NOT NULL,
 			version_after BIGINT UNSIGNED NOT NULL,
-			envelope BLOB NOT NULL,
-			write_set BLOB NOT NULL
+			envelope MEDIUMBLOB NOT NULL,
+			write_set MEDIUMBLOB NOT NULL
 		)`,
 		indexes: []string{
 			"CREATE UNIQUE INDEX `tx_txid` ON `transactions` (txid)",
@@ -110,7 +127,7 @@ var baseTables = []tableDDL{
 			created_at BIGINT NOT NULL,
 			status VARCHAR(32) NOT NULL,
 			payload_hash VARCHAR(96) NOT NULL,
-			payload BLOB NOT NULL,
+			payload MEDIUMBLOB NOT NULL,
 			enc_scope VARCHAR(191) NOT NULL,
 			pruned BOOLEAN NOT NULL,
 			prune_policy VARCHAR(64) NOT NULL,
@@ -128,7 +145,7 @@ var baseTables = []tableDDL{
 			class VARCHAR(64) NOT NULL,
 			version INT UNSIGNED NOT NULL,
 			active BOOLEAN NOT NULL,
-			doc BLOB NOT NULL,
+			doc MEDIUMBLOB NOT NULL,
 			created_at BIGINT NOT NULL,
 			txid CHAR(64) NOT NULL
 		)`,
@@ -145,7 +162,7 @@ var baseTables = []tableDDL{
 			class VARCHAR(64) NOT NULL,
 			version INT UNSIGNED NOT NULL,
 			active BOOLEAN NOT NULL,
-			doc BLOB NOT NULL,
+			doc MEDIUMBLOB NOT NULL,
 			created_at BIGINT NOT NULL,
 			txid CHAR(64) NOT NULL
 		)`,
@@ -166,8 +183,8 @@ var baseTables = []tableDDL{
 			proposer_role VARCHAR(64) NOT NULL,
 			counterparty VARCHAR(160) NOT NULL,
 			counterparty_state VARCHAR(24) NOT NULL,
-			payload BLOB NOT NULL,
-			evidence BLOB NOT NULL,
+			payload MEDIUMBLOB NOT NULL,
+			evidence MEDIUMBLOB NOT NULL,
 			message VARCHAR(255) NOT NULL,
 			created_at BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL,
@@ -305,6 +322,9 @@ type tableDDL struct {
 // table is itself a ledger commit, so a fresh register's first
 // transactions are the ones that bring its own catalogue into being.
 func (s *Store) Migrate() error {
+	if err := s.checkLayout(); err != nil {
+		return err
+	}
 	return s.Do(func(tx *Tx) error {
 		existing, err := tx.Tables()
 		if err != nil {
@@ -325,4 +345,34 @@ func (s *Store) Migrate() error {
 		}
 		return nil
 	})
+}
+
+// checkLayout refuses a data directory written by another table layout
+// and marks a fresh one with the layout of this build.
+func (s *Store) checkLayout() error {
+	marker := filepath.Join(s.dir, layoutFile)
+	got, err := os.ReadFile(marker)
+	switch {
+	case err == nil:
+		if v := string(bytes.TrimSpace(got)); v != Layout {
+			return fmt.Errorf("store: data directory %s holds table layout %s and this build writes layout %s; point REGISTER_DATA_DIR at a fresh directory or restore from an export", s.dir, v, Layout)
+		}
+		return nil
+	case !os.IsNotExist(err):
+		return fmt.Errorf("store: layout marker: %w", err)
+	}
+	// No marker. Tables already present were written by layout 1, which
+	// predates the marker; an empty catalogue is a fresh directory.
+	var populated bool
+	if err := s.Do(func(tx *Tx) error {
+		tables, err := tx.Tables()
+		populated = tables["transactions"]
+		return err
+	}); err != nil {
+		return err
+	}
+	if populated {
+		return fmt.Errorf("store: data directory %s holds table layout 1 (BLOB payload columns) and this build writes layout %s; point REGISTER_DATA_DIR at a fresh directory or restore from an export", s.dir, Layout)
+	}
+	return os.WriteFile(marker, []byte(Layout+"\n"), 0o600)
 }
