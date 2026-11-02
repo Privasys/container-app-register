@@ -79,6 +79,12 @@ type FieldRules struct {
 	// Column overrides the projected column name (default: the property
 	// name).
 	Column string `json:"column,omitempty"`
+	// Member projects one scalar member of an object-valued property
+	// instead of the object itself: a record that wraps every value in an
+	// envelope {value, status, …} names "value" here and the column takes
+	// the member's type. The property must be an object that declares the
+	// member, and the member must be a scalar.
+	Member string `json:"member,omitempty"`
 	// Reference names the class this field points at, so the core can
 	// enforce the referential rule the SQL layer has no foreign keys
 	// for.
@@ -201,7 +207,42 @@ func (s *Schema) compile(path string) error {
 			return fmt.Errorf("schema: required property %q at %s is not declared", r, pathOr(path))
 		}
 	}
+	for _, name := range names {
+		if err := s.Properties[name].checkMember(path + "/" + name); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// checkMember validates a projected member: the property must be an
+// object that declares it, and the member must be a scalar, because a
+// column holds one value.
+func (s *Schema) checkMember(path string) error {
+	if s.Register == nil || s.Register.Member == "" {
+		return nil
+	}
+	if s.Type != "object" {
+		return fmt.Errorf("schema: member %q at %s: the property is %s, not an object",
+			s.Register.Member, path, orAny(s.Type))
+	}
+	m, ok := s.Properties[s.Register.Member]
+	if !ok {
+		return fmt.Errorf("schema: member %q at %s is not a declared property of the object", s.Register.Member, path)
+	}
+	switch m.Type {
+	case "", "string", "integer", "number", "boolean":
+		return nil
+	}
+	return fmt.Errorf("schema: member %q at %s is %s; a projected member must be a scalar",
+		s.Register.Member, path, m.Type)
+}
+
+func orAny(t string) string {
+	if t == "" {
+		return "untyped"
+	}
+	return t
 }
 
 // Errors is the accumulated list of validation failures.
@@ -469,10 +510,13 @@ func (s *Schema) PIIFields() []string {
 // Projection describes one column of a class's query table.
 type Projection struct {
 	Property string
-	Column   string
-	Type     string
-	Indexed  bool
-	Unique   bool
+	// Member is the object member projected instead of the property,
+	// empty for a scalar property.
+	Member  string
+	Column  string
+	Type    string
+	Indexed bool
+	Unique  bool
 }
 
 // Projections lists the properties that project into the class's query
@@ -493,10 +537,18 @@ func (s *Schema) Projections() []Projection {
 		if col == "" {
 			col = name
 		}
+		typ := p.Type
+		if p.Register.Member != "" {
+			typ = "string"
+			if m := p.Properties[p.Register.Member]; m != nil && m.Type != "" {
+				typ = m.Type
+			}
+		}
 		out = append(out, Projection{
 			Property: name,
+			Member:   p.Register.Member,
 			Column:   col,
-			Type:     p.Type,
+			Type:     typ,
 			Indexed:  p.Register.Indexed || p.Register.Unique,
 			Unique:   p.Register.Unique,
 		})

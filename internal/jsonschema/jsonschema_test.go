@@ -125,3 +125,47 @@ func TestFormats(t *testing.T) {
 		t.Error("expected a malformed digest to be refused")
 	}
 }
+
+func TestMemberProjections(t *testing.T) {
+	envelope := func(valueType, extra string) string {
+		return `{"type":"object","properties":{"value":{"type":"` + valueType + `"` + extra + `},"status":{"type":"string"}},` +
+			`"x-register":{"queryable":true,"member":"value"}}`
+	}
+	s := compile(t, `{"type":"object","properties":{
+		"name":  `+envelope("string", "")+`,
+		"size":  `+envelope("integer", "")+`,
+		"flag":  `+envelope("boolean", "")+`,
+		"since": `+envelope("string", `,"format":"date"`)+`,
+		"plain": {"type":"string","x-register":{"queryable":true}}
+	}}`)
+	got := s.Projections()
+	want := []Projection{
+		{Property: "flag", Member: "value", Column: "flag", Type: "boolean"},
+		{Property: "name", Member: "value", Column: "name", Type: "string"},
+		{Property: "plain", Column: "plain", Type: "string"},
+		{Property: "since", Member: "value", Column: "since", Type: "string"},
+		{Property: "size", Member: "value", Column: "size", Type: "integer"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("projections = %+v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("projection %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	for _, tc := range []struct{ name, doc, want string }{
+		{"undeclared member", `{"type":"object","properties":{"name":{"type":"object","properties":{"status":{"type":"string"}},"x-register":{"queryable":true,"member":"value"}}}}`,
+			`member "value" at /name is not a declared property`},
+		{"member on a scalar", `{"type":"object","properties":{"name":{"type":"string","x-register":{"queryable":true,"member":"value"}}}}`,
+			`member "value" at /name: the property is string, not an object`},
+		{"member that is an object", `{"type":"object","properties":{"name":{"type":"object","properties":{"value":{"type":"object"}},"x-register":{"queryable":true,"member":"value"}}}}`,
+			`member "value" at /name is object; a projected member must be a scalar`},
+	} {
+		_, err := Compile([]byte(tc.doc))
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want %q", tc.name, err, tc.want)
+		}
+	}
+}
