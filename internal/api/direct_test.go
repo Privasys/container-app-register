@@ -67,3 +67,31 @@ func TestDirectLegIsReportedAndAssuranceIsRecorded(t *testing.T) {
 		}
 	}
 }
+
+// An adopter narrows the federated identities its gate offers through the
+// runtime config; the register itself has no opinion.
+func TestSignInProvidersReachThePage(t *testing.T) {
+	ts, srv, reg := newTestServer(t)
+	srv.TrustSession = true
+	srv.Ready(reg, auth.DevVerifier{})
+	for _, tc := range []struct {
+		providers []string
+		want      string
+	}{{nil, ""}, {[]string{"microsoft"}, `"providers":["microsoft"]`}} {
+		srv.SignInProviders = tc.providers
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/app-config.js", nil)
+		req.Host = "diom-dar.test.privasys.org"
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if tc.want == "" && strings.Contains(string(body), `"providers"`) {
+			t.Fatalf("no providers set, got %s", body)
+		}
+		if tc.want != "" && !strings.Contains(string(body), tc.want) {
+			t.Fatalf("want %s in %s", tc.want, body)
+		}
+	}
+}
