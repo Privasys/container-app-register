@@ -39,6 +39,13 @@ func registerExplorer(mux *http.ServeMux, s *Server) {
 			http.Redirect(w, r, "/", http.StatusFound)
 		})
 	}
+	// An adopter site takes the root and the paths it declares, and the
+	// console moves to the path the site names. Root-level console files
+	// (/assets/, /vendor/, /brand/, /favicon.svg) stay where the console
+	// build expects them.
+	if s.site != nil {
+		registerSite(mux, s)
+	}
 	mux.Handle("/", s.staticHandler())
 }
 

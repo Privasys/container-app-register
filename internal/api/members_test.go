@@ -57,7 +57,7 @@ func TestMembershipFromTheFirstInvitation(t *testing.T) {
 	ts, srv, reg := newTestServer(t)
 	srv.TrustSession = true
 	out := map[string]any{}
-	if err := bootstrapMembers(reg, []byte(`{"admin_invite":true}`), out); err != nil {
+	if err := srv.bootstrapMembers(reg, []byte(`{"admin_invite":true}`), out); err != nil {
 		t.Fatal(err)
 	}
 	srv.Ready(reg, auth.DevVerifier{})
@@ -107,7 +107,7 @@ func TestMembershipFromTheFirstInvitation(t *testing.T) {
 	// The configure call runs on every restart. It must not mint a
 	// second invitation once somebody administers the register.
 	again := map[string]any{}
-	if err := bootstrapMembers(reg, []byte(`{"admin_invite":true}`), again); err != nil {
+	if err := srv.bootstrapMembers(reg, []byte(`{"admin_invite":true}`), again); err != nil {
 		t.Fatal(err)
 	}
 	if _, minted := again["admin_invite"]; minted {
