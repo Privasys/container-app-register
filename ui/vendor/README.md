@@ -4,9 +4,9 @@
 
 | | |
 |---|---|
-| Source | github.com/Privasys/auth, `sdk/`, SDK 0.14.2 |
+| Source | github.com/Privasys/auth, `sdk/`, SDK 0.14.6 (the build published at privasys.id/auth/) |
 | Build | `npm run build` in `sdk/`, output `dist/privasys-auth-client.iife.js` |
-| SHA-256 | `6836edc5cb10d8ab1244b25a7da04980f8a7dfb1aeeedeab9a0bc55b36c20a9e` |
+| SHA-256 | `0589471ced12a1f23b9034257c2cca3ecef429ba0bae0ef81dc7e5fed1d5b358` |
 
 It is vendored rather than installed from a registry so the image carries one reviewed file instead of a package dependency. The client holds no keys: the session key lives in the Privasys ID iframe it opens, and the page exchanges plaintext with that iframe over `postMessage`.
 
