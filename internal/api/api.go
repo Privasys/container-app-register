@@ -80,6 +80,11 @@ type Server struct {
 	// WebDir holds the built browser UI. Empty, the register serves its
 	// API and nothing to look at.
 	WebDir string
+	// SiteDir holds an adopter site: public pages, shells and static
+	// files an image built on the register puts in front of it. Empty,
+	// the console takes the root as it always has. See LoadSite.
+	SiteDir string
+	site    *Site
 	// ClientID, when set, is the identity-provider client the console
 	// signs in as, in place of the one built into the page.
 	ClientID string

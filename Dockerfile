@@ -56,7 +56,9 @@ COPY privasys.json /privasys.json
 # `pack_ref`, or deliver its own inline.
 COPY packs /packs
 
-# The console.
+# The console. An image built on this one may add an adopter site at
+# /site (see README, "Adopter site"): its pages take the root and the
+# console moves to /console.
 COPY --from=ui /src/ui/dist /web
 
 # Everything stays behind the configure gate until the attested configure
