@@ -112,10 +112,21 @@ func (r *Register) Members(p *auth.Principal) ([]Member, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A grant made without a display (a bootstrap, an invitation accepted
+	// before the person's first sign-in carried a name) shows the name the
+	// register has since recorded for the person.
+	names, err := r.profileNames()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Member, 0, len(rows))
 	for _, row := range rows {
+		display := row.Str("display")
+		if display == "" {
+			display = names[row.Str("sub")]
+		}
 		out = append(out, Member{
-			Sub: row.Str("sub"), Role: row.Str("role"), Display: row.Str("display"),
+			Sub: row.Str("sub"), Role: row.Str("role"), Display: display,
 			GrantedBy: row.Str("granted_by"), GrantedAt: row.Int("granted_at"), TxID: row.Str("txid"),
 		})
 	}

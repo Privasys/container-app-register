@@ -74,3 +74,16 @@ func truncateRunes(s string, n int) string {
 	}
 	return string(runes[:n])
 }
+
+// profileNames maps every subject with a recorded name to that name.
+func (r *Register) profileNames() (map[string]string, error) {
+	rows, err := r.st.Query("SELECT sub, name FROM `identities` WHERE name <> ''")
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[string]string, len(rows))
+	for _, row := range rows {
+		names[row.Str("sub")] = row.Str("name")
+	}
+	return names, nil
+}
