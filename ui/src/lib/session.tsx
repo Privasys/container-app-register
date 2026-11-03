@@ -130,9 +130,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             clientId: authConfig.clientId,
             appName: authConfig.appName,
             brokerUrl: authConfig.brokerUrl,
-            // Signing in is all the register asks for. Who a person is to
-            // the register is the role someone granted them here.
-            scope: ['openid', 'offline_access'],
+            // Who a person is to the register is the role someone granted them
+            // here; their address and name, which the registration asks for,
+            // ride on the first token after a sign-in and are recorded then.
+            scope: ['openid', 'email', 'profile', 'offline_access'],
             container: gateRef.current ?? undefined,
             presentation: 'page',
             app: { displayName: 'Register', logoUrl },
