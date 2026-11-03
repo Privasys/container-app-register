@@ -143,7 +143,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             // an app token over its own origin and the runtime identifies
             // the caller.
             ...(direct
-                ? { methods: ['social', 'passkey'] as const, audience: appAudience, ...(signInProviders.length ? { providers: signInProviders } : {}), pitch: { ...DIRECT_PITCH, logoUrl } }
+                ? { methods: ['social', 'wallet'] as const, audience: appAudience, ...(signInProviders.length ? { providers: signInProviders } : {}), pitch: { ...DIRECT_PITCH, logoUrl } }
                 : {
                       sessionRelay: { appHost: authConfig.appHost },
                       methods: ['wallet'] as const,
