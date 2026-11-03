@@ -173,7 +173,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     await f.connect();
                     // The token names this page's own host as its audience;
                     // the runtime accepts it for this app alone.
-                    t = bearerTransport(() => f.getTokenForAudience(location.host), () => roleRef.current);
+                    // The gate's frame is torn down once it has signed the person
+                    // in, and the client of this build does not re-mount the
+                    // session frame on its own: getSession() does (idempotent
+                    // once mounted), and the audience token is minted through it.
+                    t = bearerTransport(async () => {
+                        await f.getSession();
+                        return f.getTokenForAudience(location.host);
+                    }, () => roleRef.current);
                 } else {
                     t = devTransport(stored(TOKEN_KEY), () => roleRef.current);
                 }

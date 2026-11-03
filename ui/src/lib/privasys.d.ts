@@ -63,6 +63,9 @@ export interface AuthFrame {
      *  minted from the signed-in session; the runtime on a direct name
      *  accepts it for that app only. Requires a session: after `connect()`. */
     getTokenForAudience(audience: string): Promise<string>;
+    /** Mounts the persistent session frame (idempotent once mounted) and
+     *  returns the restored session, or null when there is none. */
+    getSession(): Promise<{ token: string } | null>;
     clearSession(): Promise<void>;
     cancel(): void;
     destroy(): void;
