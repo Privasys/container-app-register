@@ -178,4 +178,15 @@ func TestTheProfileAssertedAtSignInIsKeptForLaterRequests(t *testing.T) {
 	if err != nil || p.Name != "Bertrand Föing" || p.Email != "b.foing@example.gov.im" || p.FirstSeen == 0 {
 		t.Fatalf("profile %+v: %v", p, err)
 	}
+
+	// A grant made without a display, such as the configure call's admins,
+	// shows the recorded name in the member listing.
+	if err := srv.bootstrapMembers(reg, []byte(`{"admins":"sub-profile"}`), map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	status, members := call(t, ts, http.MethodGet, "/api/v1/members", "sub-profile", "")
+	listed, _ := members["members"].([]any)
+	if status != http.StatusOK || len(listed) != 1 || listed[0].(map[string]any)["display"] != "Bertrand Föing" {
+		t.Fatalf("members = %d %v, want the recorded name on the bootstrap grant", status, members)
+	}
 }
