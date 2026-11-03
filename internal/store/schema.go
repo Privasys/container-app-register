@@ -283,6 +283,21 @@ var baseTables = []tableDDL{
 		},
 	},
 	{
+		// What the identity provider said about a person when they signed
+		// in. It keeps no profile of its own, so the name and the address
+		// it proved reach the register with the first request after a
+		// sign-in and never again until the next one; the register keeps
+		// them here, keyed by the subject, to know the person afterwards.
+		name: "identities",
+		ddl: `CREATE TABLE ` + "`identities`" + ` (
+			sub VARCHAR(256) PRIMARY KEY,
+			email VARCHAR(254) NOT NULL,
+			name VARCHAR(128) NOT NULL,
+			first_seen BIGINT NOT NULL,
+			updated_at BIGINT NOT NULL
+		)`,
+	},
+	{
 		// Invitations: a single-use link that grants one role to whoever
 		// opens it and signs in. Only the hash of the link's secret is
 		// kept, so the log can show an invitation without being one.

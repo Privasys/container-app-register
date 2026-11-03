@@ -12,10 +12,12 @@
 // refusing everything else.
 //
 // A caller is known one of two ways. A person in a browser arrives over
-// a sealed session, and the runtime asserts who they are in the
-// X-Privasys-Sub header, which it strips from everything inbound. A
-// machine arrives with a bearer token, verified here against the
-// identity provider's published keys.
+// a sealed session or a direct name, and the runtime asserts who they
+// are in the X-Privasys-Sub header, which it strips from everything
+// inbound; beside it, right after a sign-in, the address the identity
+// provider proved and the person's name, which the register records on
+// first sight. A machine arrives with a bearer token, verified here
+// against the identity provider's published keys.
 package api
 
 import (
@@ -24,10 +26,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/register"
@@ -321,6 +326,15 @@ func (s *Server) identify(r *http.Request, reg *register.Register, verifier auth
 		case "verified", "unverified":
 			id.Assurance = level
 		}
+		// The identity provider keeps no profile: the first request after
+		// a sign-in is the only one that says who the person is, so the
+		// register records it then and knows them from the record after.
+		email, name := assertedProfile(r.Header)
+		profile, err := reg.SeeIdentity(sub, email, name)
+		if err != nil {
+			return nil, "", fmt.Errorf("identity lookup: %w", err)
+		}
+		id.Email, id.Display = profile.Email, profile.Name
 	} else {
 		header := r.Header.Get("Authorization")
 		if !strings.HasPrefix(header, "Bearer ") {
@@ -344,6 +358,27 @@ func (s *Server) identify(r *http.Request, reg *register.Register, verifier auth
 		id.Display = display
 	}
 	return id, tenant, nil
+}
+
+// assertedProfile reads what the runtime says about the person beside
+// their subject: X-Privasys-Email, an address the token said was proved,
+// and X-Privasys-Name, the account's name, percent-encoded UTF-8. Both
+// are stripped from everything inbound by the runtime, like the subject,
+// so they are only ever its own statement. A value the runtime would
+// never have written (a bad escape, a control character, an address
+// that is not one) is ignored rather than recorded.
+func assertedProfile(h http.Header) (email, name string) {
+	email = strings.TrimSpace(h.Get("X-Privasys-Email"))
+	if len(email) > 254 || strings.Count(email, "@") != 1 || strings.ContainsFunc(email, func(c rune) bool { return c <= ' ' || c >= 0x7f }) {
+		email = ""
+	}
+	if raw := strings.TrimSpace(h.Get("X-Privasys-Name")); raw != "" {
+		decoded, err := url.PathUnescape(raw)
+		if err == nil && utf8.ValidString(decoded) && !strings.ContainsFunc(decoded, unicode.IsControl) {
+			name = strings.TrimSpace(decoded)
+		}
+	}
+	return email, name
 }
 
 func actingRole(r *http.Request) string {
