@@ -235,7 +235,13 @@ its own origin. The runtime verifies the token, replaces it with
 `X-Privasys-Sub` and `X-Privasys-Attestation-Level` (`verified` for the
 wallet, `unverified` otherwise), and the register records that level on
 the identity (`assurance` in `/api/v1/me`), so a pack can keep its
-consequential workflows wallet-only. The manifest opts in with
+consequential workflows wallet-only. Beside the subject, the first
+request after a sign-in carries `X-Privasys-Email` (an address the token
+said was proved) and `X-Privasys-Name` (percent-encoded UTF-8): the
+identity provider keeps no profile, so no later request repeats them. The
+register records both on first sight, keyed by the subject (the
+`identities` table), and knows the person from the record afterwards
+(`display` and `email` in `/api/v1/me`). The manifest opts in with
 `surfaces.direct: "private"`; the page learns it is on a direct name from
 `/app-config.js`.
 

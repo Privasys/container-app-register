@@ -234,6 +234,9 @@ func (s *Server) me(req *request) (any, error) {
 	if req.id.Assurance != "" {
 		out["assurance"] = req.id.Assurance
 	}
+	if req.id.Email != "" {
+		out["email"] = req.id.Email
+	}
 	if req.p == nil {
 		out["status"] = "no_role"
 		if !errors.Is(req.refusal, auth.ErrNoRole) {

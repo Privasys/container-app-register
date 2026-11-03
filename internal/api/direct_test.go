@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -118,5 +119,63 @@ func TestAppIDReachesThePage(t *testing.T) {
 		if tc.want != "" && !strings.Contains(string(body), tc.want) {
 			t.Fatalf("want %s in %s", tc.want, body)
 		}
+	}
+}
+
+// The identity provider keeps no profile, so only the first request after a
+// sign-in says who the person is: the register records the address and the
+// name then, and knows the person from the record on every later request.
+// What the runtime would never have written is not recorded.
+func TestTheProfileAssertedAtSignInIsKeptForLaterRequests(t *testing.T) {
+	ts, srv, reg := newTestServer(t)
+	srv.TrustSession = true
+	srv.Ready(reg, auth.DevVerifier{})
+	me := func(sub, email, name string) map[string]any {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/v1/me", nil)
+		req.Header.Set("X-Privasys-Sub", sub)
+		if email != "" {
+			req.Header.Set("X-Privasys-Email", email)
+		}
+		if name != "" {
+			req.Header.Set("X-Privasys-Name", name)
+		}
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != http.StatusOK {
+			t.Fatalf("status %d: %v", resp.StatusCode, err)
+		}
+		return out
+	}
+	expect := func(out map[string]any, display, email string) {
+		t.Helper()
+		if out["display"] != display || (email == "" && out["email"] != nil) || (email != "" && out["email"] != email) {
+			t.Fatalf("want display %q email %q, got display %v email %v", display, email, out["display"], out["email"])
+		}
+	}
+
+	// Never seen: the register knows only the subject.
+	expect(me("sub-profile", "", ""), "", "")
+	// The first request after the sign-in carries the profile, name percent-encoded.
+	expect(me("sub-profile", "a.keeper@example.org", "Ada%20Keeper"), "Ada Keeper", "a.keeper@example.org")
+	// Later requests carry nothing, and the person is still known.
+	expect(me("sub-profile", "", ""), "Ada Keeper", "a.keeper@example.org")
+	// Another subject is another person.
+	expect(me("sub-other", "", ""), "", "")
+	// A sign-in with a changed name updates it; UTF-8 survives the encoding.
+	expect(me("sub-profile", "", "Ada%20K%C3%A9eper"), "Ada Kéeper", "a.keeper@example.org")
+	// What the runtime would never write is ignored: a bad escape, a control
+	// character, an address that is not one.
+	expect(me("sub-profile", "not an address", "%ZZ"), "Ada Kéeper", "a.keeper@example.org")
+	expect(me("sub-profile", "", "line%0Abreak"), "Ada Kéeper", "a.keeper@example.org")
+
+	// The record is the register's own, readable without a request.
+	p, err := reg.Profile("sub-profile")
+	if err != nil || p.Name != "Ada Kéeper" || p.Email != "a.keeper@example.org" || p.FirstSeen == 0 {
+		t.Fatalf("profile %+v: %v", p, err)
 	}
 }
