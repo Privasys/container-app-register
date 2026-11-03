@@ -77,6 +77,9 @@ func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
 	if s.ClientID != "" {
 		doc["clientId"] = s.ClientID
 	}
+	if s.AppID != "" {
+		doc["appId"] = s.AppID
+	}
 	if len(s.SignInProviders) > 0 {
 		doc["providers"] = s.SignInProviders
 	}

@@ -76,6 +76,9 @@ func run(log *slog.Logger) error {
 	// nothing strips it from an inbound request, so it is not believed.
 	server.TrustSession, server.WebDir, server.ClientID = cfg.OnPlatform(), cfg.WebDir, cfg.ClientID
 	server.SignInProviders = cfg.SignInProviders
+	// The page names the app as the audience of the token it asks for, in
+	// the hex form the identity provider and the attestation certificate use.
+	server.AppID = config.AppIDHex(cfg.AppID)
 	// An adopter site, when the image carries one, is read before the
 	// server listens: a defect in it is a build defect, not a 500.
 	server.SiteDir = cfg.SiteDir

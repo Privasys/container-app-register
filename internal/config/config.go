@@ -215,3 +215,19 @@ func list(v string) []string {
 	}
 	return out
 }
+
+// AppIDHex is the app id as the attestation certificate and the identity
+// provider write it: lower-case hex, no dashes. Anything that is not a
+// 32-digit hex string once the dashes are removed yields "".
+func AppIDHex(raw string) string {
+	id := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(raw), "-", ""))
+	if len(id) != 32 {
+		return ""
+	}
+	for _, c := range id {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return ""
+		}
+	}
+	return id
+}

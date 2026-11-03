@@ -88,6 +88,9 @@ type Server struct {
 	// ClientID, when set, is the identity-provider client the console
 	// signs in as, in place of the one built into the page.
 	ClientID string
+	// AppID, when set, is the platform's identifier of this app in hex;
+	// the page names it as the audience of the token it asks for.
+	AppID string
 	// SignInProviders narrows the federated identities the console offers
 	// on a direct name; empty offers them all.
 	SignInProviders []string
