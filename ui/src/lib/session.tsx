@@ -177,10 +177,24 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     // in, and the client of this build does not re-mount the
                     // session frame on its own: getSession() does (idempotent
                     // once mounted), and the audience token is minted through it.
-                    t = bearerTransport(async () => {
+                    const mint = async () => {
                         await f.getSession();
                         return f.getTokenForAudience(location.host);
-                    }, () => roleRef.current);
+                    };
+                    // The sign-in frame keeps one session per identity provider for
+                    // every app on this browser, so the session found may have been
+                    // opened by another app and carry no refresh token for this
+                    // one. Such a session is cleared and the person signs in here,
+                    // rather than being left with an error and no way out.
+                    try {
+                        await mint();
+                    } catch (e) {
+                        if (!/no refresh token/i.test(e instanceof Error ? e.message : String(e))) throw e;
+                        await f.clearSession();
+                        await f.connect({ container: gateRef.current ?? undefined });
+                        await mint();
+                    }
+                    t = bearerTransport(mint, () => roleRef.current);
                 } else {
                     t = devTransport(stored(TOKEN_KEY), () => roleRef.current);
                 }
