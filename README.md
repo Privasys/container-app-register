@@ -184,6 +184,7 @@ to sign in, so the console offers stand-in personas instead.
 | `REGISTER_WEB_DIR` | Where the built console lives. Default `/web`, which is where the image puts it. |
 | `REGISTER_SITE_DIR` | An adopter site to serve in front of the register (see [Adopter site](#adopter-site)). Default `/site` when that directory exists; otherwise none. |
 | `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. |
+| `PRIVASYS_APP_ID` | Set by the platform runtime: the app's identifier. The page asks the identity provider for a token whose audience is this app (`app:<id>`), which is what the runtime accepts on a direct name. |
 | `REGISTER_SIGNIN_PROVIDERS` | On a direct adopter name, which federated identities the sign-in gate offers, comma-separated and in order (`github`, `google`, `microsoft`, `linkedin`). Empty offers every provider the identity provider has. An adopter whose people all use one work identity sets the one, e.g. `microsoft`. |
 | `REGISTER_OIDC_ISSUER` | Identity provider for bearer tokens. Default `https://privasys.id`. |
 | `REGISTER_OIDC_AUDIENCE` | The audience bearer tokens must carry. |

@@ -9,7 +9,7 @@
 // console down on a transport blip.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { authConfig, direct, sealed, signInProviders } from './config';
+import { authConfig, direct, sealed, signInProviders, appAudience } from './config';
 import type { AuthFrame, SealedSessionState } from './privasys';
 import { ApiError, bearerTransport, devTransport, sealedTransport, type Transport } from './transport';
 import type { Me } from './types';
@@ -179,7 +179,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                     // once mounted), and the audience token is minted through it.
                     const mint = async () => {
                         await f.getSession();
-                        return f.getTokenForAudience(location.host);
+                        return f.getTokenForAudience(appAudience);
                     };
                     // The sign-in frame keeps one session per identity provider for
                     // every app on this browser, so the session found may have been

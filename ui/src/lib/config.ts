@@ -13,6 +13,8 @@ declare global {
             version?: string;
             name?: string;
             clientId?: string;
+            /** The platform's identifier of this app, in hex, from the runtime. */
+            appId?: string;
             /** Whether the register is on the platform, where people sign in
              *  with their wallet and every request is sealed. */
             session?: boolean;
@@ -51,6 +53,12 @@ export const authConfig = {
     brokerUrl: 'wss://relay.privasys.org/relay',
     appHost: runtime?.appHost ?? location.host
 };
+
+/** The audience of the token the page asks for on a direct name: the app
+ *  itself ("app:<id>"), the one audience the identity provider grants a
+ *  client with its own subjects; the page's host when the runtime did not
+ *  name the app, which only happens off the platform. */
+export const appAudience = runtime?.appId ? `app:${runtime.appId}` : location.host;
 
 /** The federated identities offered on a direct name; empty means all. */
 export const signInProviders = runtime?.providers ?? [];
