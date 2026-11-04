@@ -43,6 +43,7 @@ const (
 	KindTaskWithdraw   = "workflow.withdraw"
 	KindRetentionPrune = "retention.prune"
 	KindErasure        = "erasure.execute"
+	KindProfileRecord  = "profile.record"
 	KindKeyEnrol       = "key.enrol"
 	KindKeyCreate      = "key.create"
 	KindKeyDestroy     = "key.destroy"

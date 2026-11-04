@@ -191,6 +191,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/retention", s.wrap(s.horizons))
 	mux.HandleFunc("POST /api/v1/retention/prune", s.wrap(s.prune))
 	mux.HandleFunc("POST /api/v1/retention/erase", s.wrap(s.erase))
+	mux.HandleFunc("POST /api/v1/retention/erase-profile", s.wrap(s.eraseProfile))
 
 	mux.HandleFunc("POST /api/v1/keys", s.wrap(s.enrolKey))
 	mux.HandleFunc("GET /api/v1/keys/{scope}/recovery-wrap", s.wrap(s.recoveryWrap))
