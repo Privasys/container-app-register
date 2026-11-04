@@ -47,7 +47,7 @@ test('an invitation makes its holder a member, once, and the history says who an
     await expect(guest.locator('nav button.active')).toHaveText('History');
     await expect(guest.locator('#identity .role')).toHaveText('Auditor');
     await expect(guest.locator('nav button[data-view="members"]')).toHaveCount(0);
-    const entry = guest.locator('#log-list .entry', { hasText: 'Grant auditor to Court of auditors' }).first();
+    const entry = guest.locator('#log-list .entry', { hasText: 'Grant auditor to newcomer-' }).first();
     await expect(entry).toContainText('invite.redeem');
     await entry.click();
     await expect(guest.locator('#log-detail')).toContainText(`newcomer-${info.project.name} acting as invitee`);
