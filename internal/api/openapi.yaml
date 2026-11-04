@@ -571,6 +571,27 @@ paths:
       responses:
         "200": { description: OK }
 
+  /api/v1/retention/erase-profile:
+    post:
+      tags: [Retention]
+      summary: Erase the name and address recorded for one person
+      description: |
+        Destroys the key of the person's sealed profile. Their memberships
+        and the history of what they did remain, naming them only by their
+        subject. A later sign-in does not record the profile again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sub, reason]
+              properties:
+                sub: { type: string }
+                reason: { type: string }
+      responses:
+        "200": { description: OK }
+
   /api/v1/keys:
     post:
       tags: [Keys]

@@ -360,7 +360,7 @@ func (s *Server) redeemInvite(req *request) (any, error) {
 	if err := decode(req.r, &in); err != nil {
 		return nil, err
 	}
-	inv, txn, err := req.reg.RedeemInvite(req.tenant, req.id.Sub, req.id.Display, req.r.PathValue("id"), in.Secret)
+	inv, txn, err := req.reg.RedeemInvite(req.tenant, req.id.Sub, req.r.PathValue("id"), in.Secret)
 	if err != nil {
 		return nil, err
 	}
@@ -640,6 +640,21 @@ func (s *Server) erase(req *request) (any, error) {
 		return nil, err
 	}
 	return req.reg.Erase(req.p, body)
+}
+
+func (s *Server) eraseProfile(req *request) (any, error) {
+	var body struct {
+		Sub    string `json:"sub"`
+		Reason string `json:"reason"`
+	}
+	if err := decode(req.r, &body); err != nil {
+		return nil, err
+	}
+	txn, err := req.reg.EraseProfile(req.p, body.Sub, body.Reason)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
 }
 
 // -- keys ------------------------------------------------------------------

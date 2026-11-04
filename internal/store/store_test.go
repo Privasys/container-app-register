@@ -216,3 +216,42 @@ func TestOtherLayoutsAreRefused(t *testing.T) {
 		t.Fatalf("layout 9 directory: %v", err)
 	}
 }
+
+// A directory from before profiles were sealed loses its clear names and
+// addresses when it is opened, and keeps its memberships.
+func TestMigrateRemovesClearProfiles(t *testing.T) {
+	s := openTest(t)
+	if err := s.Do(func(tx *Tx) error {
+		if err := tx.Exec("CREATE TABLE `identities` (sub VARCHAR(256) PRIMARY KEY, email VARCHAR(254) NOT NULL, name VARCHAR(128) NOT NULL)"); err != nil {
+			return err
+		}
+		if err := tx.Exec("INSERT INTO `identities` VALUES ('a', 'a@example.invalid', 'A Person')"); err != nil {
+			return err
+		}
+		return tx.Exec("INSERT INTO `members` VALUES ('m', 't', 'a', 'operator', 'A Person', 'x', 1, 'tx')")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Migrate(); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	if err := s.Do(func(tx *Tx) error {
+		tables, err := tx.Tables()
+		if err != nil {
+			return err
+		}
+		if tables["identities"] {
+			t.Error("the clear table survived")
+		}
+		row, err := tx.QueryOne("SELECT sub, display FROM `members` WHERE id = 'm'")
+		if err != nil {
+			return err
+		}
+		if row == nil || row.Str("sub") != "a" || row.Str("display") != "" {
+			t.Errorf("member row %v, want the grant kept without the name", row)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

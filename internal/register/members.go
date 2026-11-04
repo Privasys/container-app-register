@@ -140,6 +140,9 @@ func (r *Register) Members(p *auth.Principal) ([]Member, error) {
 }
 
 // GrantRole gives a subject a role.
+//
+// A display name given with the grant is recorded in the person's sealed
+// profile, unless a name is already held; it is not kept with the grant.
 func (r *Register) GrantRole(p *auth.Principal, sub, role, display, reason string) (*model.Transaction, error) {
 	if !p.Can(auth.PermMembers) {
 		return nil, fmt.Errorf("%s may not manage members", p.Acting)
@@ -151,9 +154,16 @@ func (r *Register) GrantRole(p *auth.Principal, sub, role, display, reason strin
 	var txn *model.Transaction
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		txn, err = r.grant(tx, model.KindMemberGrant, principalAuthor(p), p.Tenant, sub, role, display, reason, nil)
+		txn, err = r.grant(tx, model.KindMemberGrant, principalAuthor(p), p.Tenant, sub, role, reason, nil)
 		return err
 	})
+	if err != nil || display == "" {
+		return txn, err
+	}
+	held, err := r.Profile(sub)
+	if err == nil && held.Name == "" {
+		_, err = r.SeeIdentity(sub, "", display)
+	}
 	return txn, err
 }
 
@@ -163,7 +173,7 @@ func (r *Register) BootstrapMember(sub, role string) (*model.Transaction, error)
 	var txn *model.Transaction
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		txn, err = r.grant(tx, model.KindMemberGrant, r.systemAuthor("configure"), r.opts.Tenant, strings.TrimSpace(sub), role, "",
+		txn, err = r.grant(tx, model.KindMemberGrant, r.systemAuthor("configure"), r.opts.Tenant, strings.TrimSpace(sub), role,
 			"Named by the deployer in the configure call.", nil)
 		return err
 	})
@@ -172,7 +182,7 @@ func (r *Register) BootstrapMember(sub, role string) (*model.Transaction, error)
 
 // grant writes one membership row, with whatever else the same action
 // changes (a redeemed invitation is spent in the same commit).
-func (r *Register) grant(tx *store.Tx, kind string, author model.Author, tenant, sub, role, display, reason string,
+func (r *Register) grant(tx *store.Tx, kind string, author model.Author, tenant, sub, role, reason string,
 	extra []model.WriteOp) (*model.Transaction, error) {
 	spec := r.pk.Model().Role(role)
 	if spec == nil {
@@ -197,24 +207,20 @@ func (r *Register) grant(tx *store.Tx, kind string, author model.Author, tenant,
 			return nil, fmt.Errorf("separation of duties: %s already holds %s, which may not be held with %s",
 				clip(sub, 24), other, role)
 		}
-		if display == "" {
-			display = row.Str("display")
-		}
 	}
 
 	at := r.now()
-	who := orDefault(display, clip(sub, 16))
 	ops := append([]model.WriteOp{{
 		Table: "members",
 		Key:   map[string]any{"id": memberID(tenant, sub, role)},
 		Values: map[string]any{
-			"tenant": tenant, "sub": sub, "role": role, "display": display,
+			"tenant": tenant, "sub": sub, "role": role, "display": "",
 			"granted_by": author.Sub, "granted_at": at, "txid": model.TxIDPlaceholder,
 		},
 	}}, extra...)
 	env := model.Envelope{
 		Kind: kind, Tenant: tenant, Author: author, Timestamp: at,
-		Message: composeMessage(clip(fmt.Sprintf("Grant %s to %s", role, who), model.MaxSummary),
+		Message: composeMessage(clip(fmt.Sprintf("Grant %s to %s", role, clip(sub, 16)), model.MaxSummary),
 			strings.TrimSpace(fmt.Sprintf("%s now holds the role %q (%s).\n%s",
 				sub, role, orDefault(spec.Title, role), reason))),
 	}
@@ -253,7 +259,7 @@ func (r *Register) RevokeRole(p *auth.Principal, sub, role, reason string) (*mod
 		env := model.Envelope{
 			Kind: model.KindMemberRevoke, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,
 			Message: composeMessage(
-				clip(fmt.Sprintf("Revoke %s from %s", role, orDefault(row.Str("display"), clip(sub, 16))), model.MaxSummary),
+				clip(fmt.Sprintf("Revoke %s from %s", role, clip(sub, 16)), model.MaxSummary),
 				strings.TrimSpace(fmt.Sprintf("%s no longer holds the role %q.\n%s", sub, role, reason))),
 		}
 		txn, err = r.commit(tx, env, []model.WriteOp{{
@@ -476,7 +482,7 @@ func (r *Register) CheckInvite(tenant, id, secret string) (*Invite, error) {
 // it, and spends the invitation in the same commit. The author of the
 // transaction is the person who redeemed: they hold no role yet, and
 // the record says that too.
-func (r *Register) RedeemInvite(tenant, sub, display, id, secret string) (*Invite, *model.Transaction, error) {
+func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model.Transaction, error) {
 	sub = strings.TrimSpace(sub)
 	if sub == "" || len(sub) > 256 {
 		return nil, nil, fmt.Errorf("an invitation is redeemed by a signed-in person")
@@ -490,16 +496,13 @@ func (r *Register) RedeemInvite(tenant, sub, display, id, secret string) (*Invit
 		if inv, err = r.openInvite(tx, tenant, id, secret); err != nil {
 			return err
 		}
-		if display == "" {
-			display = inv.Label
-		}
 		at := r.now()
 		spend := model.WriteOp{
 			Table: "invites", Key: map[string]any{"id": id},
 			Values: map[string]any{"used_by": sub, "used_at": at},
 		}
-		txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Display: display, Role: "invitee"}, tenant, sub,
-			inv.Role, display, fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy),
+		txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Role: "invitee"}, tenant, sub,
+			inv.Role, fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy),
 			[]model.WriteOp{spend})
 		if err == nil {
 			inv.UsedBy, inv.UsedAt, inv.Status = sub, at, "used"

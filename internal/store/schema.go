@@ -287,12 +287,13 @@ var baseTables = []tableDDL{
 		// in. It keeps no profile of its own, so the name and the address
 		// it proved reach the register with the first request after a
 		// sign-in and never again until the next one; the register keeps
-		// them here, keyed by the subject, to know the person afterwards.
-		name: "identities",
-		ddl: `CREATE TABLE ` + "`identities`" + ` (
+		// them here, keyed by the subject, sealed under a key of the
+		// person's own (scope), to know the person afterwards.
+		name: "profiles",
+		ddl: `CREATE TABLE ` + "`profiles`" + ` (
 			sub VARCHAR(256) PRIMARY KEY,
-			email VARCHAR(254) NOT NULL,
-			name VARCHAR(128) NOT NULL,
+			scope VARCHAR(191) NOT NULL,
+			sealed VARBINARY(2048) NOT NULL,
 			first_seen BIGINT NOT NULL,
 			updated_at BIGINT NOT NULL
 		)`,
@@ -355,6 +356,20 @@ func (s *Store) Migrate() error {
 			for _, idx := range t.indexes {
 				if err := tx.Exec(idx); err != nil {
 					return fmt.Errorf("store: index on %s: %w", t.name, err)
+				}
+			}
+		}
+		// A directory from before profiles were sealed held names and
+		// addresses in the clear, in this table and on membership rows.
+		// They are removed rather than converted: the next sign-in records
+		// the person again, sealed. Only development data ever had this form.
+		if existing["identities"] {
+			if err := tx.Exec("DROP TABLE `identities`"); err != nil {
+				return fmt.Errorf("store: remove identities: %w", err)
+			}
+			if existing["members"] {
+				if err := tx.Exec("UPDATE `members` SET display = ''"); err != nil {
+					return fmt.Errorf("store: clear member names: %w", err)
 				}
 			}
 		}

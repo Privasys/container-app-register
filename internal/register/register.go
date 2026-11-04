@@ -152,6 +152,7 @@ var pkColumns = map[string][]string{
 	"prune_marks":     {"txid", "idx"},
 	"webhooks":        {"id"},
 	"members":         {"id"},
+	"profiles":        {"sub"},
 	"invites":         {"id"},
 	"registry":        {"k"},
 }
@@ -487,7 +488,9 @@ func (r *Register) systemAuthor(reason string) model.Author {
 
 // principalAuthor renders an authenticated caller as a commit author.
 func principalAuthor(p *auth.Principal) model.Author {
-	return model.Author{Sub: p.Sub, Display: p.Display, Role: p.Acting}
+	// The subject and the role, never the person's name: a transaction is
+	// permanent, and a name in it could not be erased.
+	return model.Author{Sub: p.Sub, Role: p.Acting}
 }
 
 func sortedKeys[V any](m map[string]V) []string {
