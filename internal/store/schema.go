@@ -299,6 +299,18 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// Who an emailed invitation is for, sealed under a key of the
+		// invitation's own, which goes when the invitation is finished.
+		name: "invite_recipients",
+		ddl: `CREATE TABLE ` + "`invite_recipients`" + ` (
+			id VARCHAR(32) PRIMARY KEY,
+			tenant VARCHAR(64) NOT NULL,
+			scope VARCHAR(191) NOT NULL,
+			sealed VARBINARY(4096) NOT NULL,
+			reminded_at BIGINT NOT NULL
+		)`,
+	},
+	{
 		// Invitations: a single-use link that grants one role to whoever
 		// opens it and signs in. Only the hash of the link's secret is
 		// kept, so the log can show an invitation without being one.

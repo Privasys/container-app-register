@@ -56,7 +56,7 @@ type Invite struct {
 
 // Invitation lifetimes.
 const (
-	DefaultInviteLifetime = 7 * 24 * time.Hour
+	DefaultInviteLifetime = 14 * 24 * time.Hour
 	MaxInviteLifetime     = 30 * 24 * time.Hour
 )
 
@@ -299,7 +299,29 @@ func (r *Register) CreateInvite(p *auth.Principal, role, label string, validFor 
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor, nil)
+		return err
+	})
+	return inv, secret, err
+}
+
+// CreateEmailedInvite issues an invitation for a person the register
+// will write to. Their address and name are sealed, so there is no label:
+// a label is written in the clear, and it would be the same name.
+func (r *Register) CreateEmailedInvite(p *auth.Principal, role string, validFor time.Duration, to InviteRecipient) (*Invite, string, error) {
+	if !p.Can(auth.PermMembers) {
+		return nil, "", fmt.Errorf("%s may not manage members", p.Acting)
+	}
+	if len([]rune(to.Name)) > 128 || len([]rune(to.Organisation)) > 128 {
+		return nil, "", fmt.Errorf("a name or organisation is at most 128 characters")
+	}
+	var (
+		inv    *Invite
+		secret string
+	)
+	err := r.st.Do(func(tx *store.Tx) error {
+		var err error
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, "", validFor, &to)
 		return err
 	})
 	return inv, secret, err
@@ -315,14 +337,14 @@ func (r *Register) BootstrapInvite(role string, validFor time.Duration) (*Invite
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
 		inv, secret, err = r.createInvite(tx, r.systemAuthor("configure"), r.opts.Tenant, role,
-			"First administrator", validFor)
+			"First administrator", validFor, nil)
 		return err
 	})
 	return inv, secret, err
 }
 
 func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role, label string,
-	validFor time.Duration) (*Invite, string, error) {
+	validFor time.Duration, to *InviteRecipient) (*Invite, string, error) {
 	spec := r.pk.Model().Role(role)
 	if spec == nil {
 		return nil, "", fmt.Errorf("no such role %q", role)
@@ -360,7 +382,7 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 				"before %s.\nThe link's secret is not part of this record; only its hash is.",
 				inv.ID, role, orDefault(spec.Title, role), time.Unix(inv.ExpiresAt, 0).UTC().Format(time.RFC3339))),
 	}
-	_, err := r.commit(tx, env, []model.WriteOp{{
+	ops := []model.WriteOp{{
 		Table: "invites",
 		Key:   map[string]any{"id": inv.ID},
 		Values: map[string]any{
@@ -368,7 +390,17 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 			"created_by": author.Sub, "created_at": at, "expires_at": inv.ExpiresAt,
 			"used_by": "", "used_at": int64(0), "revoked": false, "txid": model.TxIDPlaceholder,
 		},
-	}})
+	}}
+	if to != nil {
+		sealed := *to
+		sealed.Secret = secret
+		more, err := r.sealRecipient(tx, tenant, inv.ID, at, sealed)
+		if err != nil {
+			return nil, "", err
+		}
+		ops = append(ops, more...)
+	}
+	_, err := r.commit(tx, env, ops)
 	if err != nil {
 		return nil, "", err
 	}
@@ -434,9 +466,16 @@ func (r *Register) RevokeInvite(p *auth.Principal, id string) (*model.Transactio
 			Kind: model.KindInviteRevoke, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,
 			Message: clip(fmt.Sprintf("Withdraw the invitation for %s", orDefault(inv.Label, inv.Role)), model.MaxSummary),
 		}
-		txn, err = r.commit(tx, env, []model.WriteOp{{
+		forget, scope, err := r.forgetRecipient(tx, id, at)
+		if err != nil {
+			return err
+		}
+		txn, err = r.commit(tx, env, append([]model.WriteOp{{
 			Table: "invites", Key: map[string]any{"id": id}, Values: map[string]any{"revoked": true},
-		}})
+		}}, forget...))
+		if err == nil && scope != "" {
+			r.ring.Forget(scope)
+		}
 		return err
 	})
 	return txn, err
@@ -501,11 +540,18 @@ func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model
 			Table: "invites", Key: map[string]any{"id": id},
 			Values: map[string]any{"used_by": sub, "used_at": at},
 		}
+		forget, scope, err := r.forgetRecipient(tx, id, at)
+		if err != nil {
+			return err
+		}
 		txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Role: "invitee"}, tenant, sub,
 			inv.Role, fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy),
-			[]model.WriteOp{spend})
+			append([]model.WriteOp{spend}, forget...))
 		if err == nil {
 			inv.UsedBy, inv.UsedAt, inv.Status = sub, at, "used"
+			if scope != "" {
+				r.ring.Forget(scope)
+			}
 		}
 		return err
 	})

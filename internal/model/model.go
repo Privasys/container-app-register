@@ -55,6 +55,8 @@ const (
 	KindInviteCreate   = "invite.create"
 	KindInviteRedeem   = "invite.redeem"
 	KindInviteRevoke   = "invite.revoke"
+	KindInviteRemind   = "invite.remind"
+	KindInviteExpire   = "invite.expire"
 	KindPackSeed       = "pack.seed"
 )
 
