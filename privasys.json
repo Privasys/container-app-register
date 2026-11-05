@@ -49,6 +49,56 @@
                             "label": "Commitment key"
                         }
                     },
+                    "mail_tenant_id": {
+                        "type": "string",
+                        "description": "The Microsoft Entra tenant of the app registration that sends this register's email through Microsoft Graph.",
+                        "x-privasys": {"label":"Email: Entra tenant id"}
+                    },
+                    "mail_client_id": {
+                        "type": "string",
+                        "description": "The app registration, which holds the Mail.Send application permission, limited to the sender mailbox.",
+                        "x-privasys": {"label":"Email: application (client) id"}
+                    },
+                    "mail_client_secret": {
+                        "type": "string",
+                        "description": "The app registration's client secret. Kept on the sealed volume and sent only to Microsoft's token endpoint. Leave empty to keep the one held.",
+                        "x-privasys": {"secret":true,"label":"Email: client secret"}
+                    },
+                    "mail_sender": {
+                        "type": "string",
+                        "description": "The address emails are sent from.",
+                        "x-privasys": {"label":"Email: sender mailbox"}
+                    },
+                    "mail_base_url": {
+                        "type": "string",
+                        "description": "The https address people reach this register at, used for the links in its emails.",
+                        "x-privasys": {"label":"Email: this register's address"}
+                    },
+                    "mail_office": {
+                        "type": "string",
+                        "description": "The office an invitation says it comes from. An office, never a person.",
+                        "x-privasys": {"label":"Email: invited by"}
+                    },
+                    "mail_organisation": {
+                        "type": "string",
+                        "description": "The organisation an invitation names when it is not given one.",
+                        "x-privasys": {"label":"Email: default organisation"}
+                    },
+                    "mail_sign_in_method": {
+                        "type": "string",
+                        "description": "How the invitation tells people they will sign in.",
+                        "x-privasys": {"label":"Email: how people sign in"}
+                    },
+                    "mail_support_email": {
+                        "type": "string",
+                        "description": "Where an invitation tells people to ask if they are unsure it is genuine.",
+                        "x-privasys": {"label":"Email: support address"}
+                    },
+                    "mail_production": {
+                        "type": "boolean",
+                        "description": "This is the production instance: emails do not carry the test notice.",
+                        "x-privasys": {"label": "Email: production"}
+                    },
                     "admin_invite": {
                         "type": "boolean",
                         "description": "Return a single-use link, valid 24 hours, that gives whoever opens it and signs in the role that manages membership. Use it for the first administrator: the subject the register sees for a person is its own, not their platform identity, so it cannot be named in advance. Ignored once somebody administers the register, so it is safe to leave set across restarts.",

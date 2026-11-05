@@ -30,11 +30,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
 	"github.com/Privasys/container-app-register/internal/auth"
+	"github.com/Privasys/container-app-register/internal/mail"
 	"github.com/Privasys/container-app-register/internal/register"
 	"github.com/Privasys/container-app-register/internal/webhook"
 )
@@ -85,6 +87,13 @@ type Server struct {
 	// WebDir holds the built browser UI. Empty, the register serves its
 	// API and nothing to look at.
 	WebDir string
+	// ConfigureMail takes the configuration document and returns the
+	// state of the email sender, empty when the register has none. It
+	// runs on every configure call, including one to a running register,
+	// so the sender can be set or rotated without a restart.
+	ConfigureMail func(document []byte) (string, error)
+	// Mailer is the email sender; nil until one is configured.
+	Mailer atomic.Pointer[mail.Mailer]
 	// SiteDir holds an adopter site: public pages, shells and static
 	// files an image built on the register puts in front of it. Empty,
 	// the console takes the root as it always has. See LoadSite.

@@ -4,6 +4,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Privasys/container-app-register/internal/auth"
+	"github.com/Privasys/container-app-register/internal/mail"
 	"github.com/Privasys/container-app-register/internal/model"
 	"github.com/Privasys/container-app-register/internal/register"
 )
@@ -129,6 +131,10 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
 			return
 		}
+		if err := s.configureMail(body, out); err != nil {
+			writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
@@ -144,6 +150,11 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
 		return
 	}
+	if err := s.configureMail(body, out); err != nil {
+		s.Fail(err)
+		writeError(w, http.StatusBadRequest, "configuration refused", err.Error())
+		return
+	}
 	s.Ready(reg, verifier)
 	status, err := reg.Status()
 	if err != nil {
@@ -152,6 +163,22 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 	}
 	out["register"] = status
 	writeJSON(w, http.StatusOK, out)
+}
+
+// configureMail hands the configuration to whatever keeps the sender.
+// What it reports names the state of the sender and never its secret.
+func (s *Server) configureMail(body []byte, out map[string]any) error {
+	if s.ConfigureMail == nil {
+		return nil
+	}
+	state, err := s.ConfigureMail(body)
+	if err != nil {
+		return err
+	}
+	if state != "" {
+		out["mail"] = state
+	}
+	return nil
 }
 
 // bootstrapMembers names the register's first administrators.
@@ -311,12 +338,20 @@ func (s *Server) listInvites(req *request) (any, error) {
 
 func (s *Server) createInvite(req *request) (any, error) {
 	var in struct {
-		Role      string `json:"role"`
-		Label     string `json:"label"`
-		ValidDays int    `json:"valid_days"`
+		Role         string `json:"role"`
+		Label        string `json:"label"`
+		ValidDays    int    `json:"valid_days"`
+		Email        string `json:"email"`
+		Name         string `json:"name"`
+		Organisation string `json:"organisation"`
 	}
 	if err := decode(req.r, &in); err != nil {
 		return nil, err
+	}
+	if in.Email != "" {
+		return s.emailInvite(req, in.Role, in.Label, in.ValidDays, register.InviteRecipient{
+			Email: strings.TrimSpace(in.Email), Name: strings.TrimSpace(in.Name), Organisation: strings.TrimSpace(in.Organisation),
+		})
 	}
 	inv, secret, err := req.reg.CreateInvite(req.p, in.Role, in.Label, time.Duration(in.ValidDays)*24*time.Hour)
 	if err != nil {
@@ -325,6 +360,51 @@ func (s *Server) createInvite(req *request) (any, error) {
 	// The secret is served here and nowhere else. It goes in the link's
 	// fragment, which a browser does not send to any server.
 	return map[string]any{"invite": inv, "link": s.inviteLink(inv.ID, secret)}, nil
+}
+
+// emailInvite issues an invitation and writes to the person. The grant
+// does not depend on the email: when the send fails the invitation
+// stands, and the link is served so the administrator can pass it on.
+// When it succeeds the link is not served, since nobody else needs it.
+func (s *Server) emailInvite(req *request, role, label string, validDays int, to register.InviteRecipient) (any, error) {
+	if label != "" {
+		return nil, errors.New("an emailed invitation has no label: the name it is for is sealed")
+	}
+	if !mail.ValidAddress(to.Email) {
+		return nil, errors.New("that is not a usable email address")
+	}
+	mailer := s.Mailer.Load()
+	if mailer == nil {
+		return nil, errors.New("this register has no email sender configured; issue a link instead")
+	}
+	inv, secret, err := req.reg.CreateEmailedInvite(req.p, role, time.Duration(validDays)*24*time.Hour, to)
+	if err != nil {
+		return nil, err
+	}
+	to.Secret = secret
+	sendErr := mailer.SendInvitation(context.WithoutCancel(req.r.Context()), s.InvitationEmail(req.reg, inv, to, false))
+	if sendErr != nil {
+		return map[string]any{
+			"invite": inv, "link": s.inviteLink(inv.ID, secret),
+			"email": "failed", "email_error": sendErr.Error(),
+		}, nil
+	}
+	return map[string]any{"invite": inv, "email": "sent"}, nil
+}
+
+// InvitationEmail is what an invitation's email says.
+func (s *Server) InvitationEmail(reg *register.Register, inv *register.Invite, to register.InviteRecipient, reminder bool) mail.Invitation {
+	out := mail.Invitation{
+		To: to.Email, Name: to.Name, Organisation: to.Organisation, RoleTitle: inv.Role,
+		Link: s.inviteLink(inv.ID, to.Secret), ExpiresAt: inv.ExpiresAt, Reminder: reminder,
+	}
+	if spec := reg.Pack().Model().Role(inv.Role); spec != nil {
+		out.RoleSummary = spec.Summary
+		if spec.Title != "" {
+			out.RoleTitle = spec.Title
+		}
+	}
+	return out
 }
 
 func (s *Server) revokeInvite(req *request) (any, error) {

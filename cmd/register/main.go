@@ -88,6 +88,7 @@ func run(log *slog.Logger) error {
 
 	app := &application{cfg: cfg, log: log, material: material, server: server}
 	server.Configure = app.configure
+	server.ConfigureMail = app.configureMail
 	server.Standby = app.standbyStatus
 	server.Deliveries = app.deliveries
 
@@ -286,6 +287,8 @@ func (a *application) configure(document []byte) (*register.Register, auth.Verif
 	go a.checkpointLoop(ctx, reg, interval)
 	if a.cfg.Mode == config.ModeStandby {
 		go a.followPrimary(ctx, reg)
+	} else {
+		go a.invitationLoop(ctx, reg)
 	}
 
 	status, _ := reg.Status()

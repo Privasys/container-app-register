@@ -153,8 +153,14 @@ paths:
                 role: { type: string }
                 label: { type: string }
                 valid_days: { type: integer, maximum: 30 }
+                email:
+                  type: string
+                  description: Write to this person. Sealed, like the name and organisation, and destroyed when the invitation is finished. Refused with a label, or when no sender is configured.
+                name: { type: string }
+                organisation: { type: string }
       responses:
-        "200": { description: Issued }
+        "200":
+          description: Issued. An emailed invitation reports email as sent, or as failed with email_error and the link to pass on; the link is not served once the email has gone.
 
   /api/v1/invites/{id}:
     delete:

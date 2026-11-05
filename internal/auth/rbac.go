@@ -34,6 +34,8 @@ type RoleSpec struct {
 	Name string `json:"name"`
 	// Title is the human name shown in the explorer.
 	Title string `json:"title,omitempty"`
+	// Summary says what the role does, in a sentence an invitation can carry.
+	Summary string `json:"summary,omitempty"`
 	// OIDCRoles are the identity-provider roles that grant this role.
 	OIDCRoles []string `json:"oidc_roles"`
 	// Permissions are the verbs this role carries.
