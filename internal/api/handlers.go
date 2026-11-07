@@ -457,11 +457,35 @@ func (s *Server) checkInvite(req *request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	title := inv.Role
-	if spec := req.reg.Pack().Model().Role(inv.Role); spec != nil && spec.Title != "" {
-		title = spec.Title
+	return inviteView(req.reg, inv), nil
+}
+
+// inviteView says what accepting an invitation brings: a role, an
+// organisation and the roles it holds, or both. An invitation to join an
+// organisation names no role, and is titled by the organisation.
+func inviteView(reg *register.Register, inv *register.Invite) map[string]any {
+	titleOf := func(role string) string {
+		if spec := reg.Pack().Model().Role(role); spec != nil && spec.Title != "" {
+			return spec.Title
+		}
+		return role
 	}
-	return map[string]any{"role": inv.Role, "role_title": title, "label": inv.Label, "expires_at": inv.ExpiresAt}, nil
+	out := map[string]any{"role": inv.Role, "role_title": titleOf(inv.Role), "label": inv.Label, "expires_at": inv.ExpiresAt}
+	if inv.Organisation != "" {
+		tenant := reg.Options().Tenant
+		name := reg.OrganisationName(tenant, inv.Organisation)
+		out["organisation"], out["organisation_name"], out["organisation_admin"] = inv.Organisation, name, inv.OrganisationAdmin
+		held, _ := reg.OrganisationRoles(tenant, inv.Organisation)
+		titles := make([]string, 0, len(held))
+		for _, r := range held {
+			titles = append(titles, titleOf(r))
+		}
+		out["organisation_roles"] = titles
+		if inv.Role == "" {
+			out["role_title"] = "a member of " + name
+		}
+	}
+	return out
 }
 
 func (s *Server) redeemInvite(req *request) (any, error) {
@@ -473,7 +497,9 @@ func (s *Server) redeemInvite(req *request) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"role": inv.Role, "transaction": txn}, nil
+	out := inviteView(req.reg, inv)
+	out["transaction"] = txn
+	return out, nil
 }
 
 // packDocument describes the register's shape to a client: what it
