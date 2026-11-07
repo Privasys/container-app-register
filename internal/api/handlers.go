@@ -284,6 +284,15 @@ func (s *Server) me(req *request) (any, error) {
 	out["status"] = "member"
 	out["principal"] = req.p
 	out["permissions"] = req.p.Permissions()
+	// The external sources this person may bring records in from, so a
+	// screen can offer the action; the register checks it again on use.
+	imports := []string{}
+	for _, src := range pk.Sources {
+		if slices.Contains(src.ImportRoles, req.p.Acting) {
+			imports = append(imports, src.Name)
+		}
+	}
+	out["imports"] = imports
 	out["role_titles"] = titles
 	return out, nil
 }

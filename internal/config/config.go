@@ -70,6 +70,11 @@ type Config struct {
 	// from the environment rather than through the configure call.
 	CommitmentKeyHex string
 
+	// Sources names the external sources of a self-configured register,
+	// as a configure call would: development and tests, where a mock
+	// stands in for each.
+	Sources string
+
 	// Tenant is the default tenant for a self-configured register.
 	Tenant string
 
@@ -126,6 +131,7 @@ func Load() (*Config, error) {
 		PrimaryURL:         os.Getenv("REGISTER_PRIMARY_URL"),
 		CommitmentKeyHex:   os.Getenv("REGISTER_COMMITMENT_KEY"),
 		Tenant:             env("REGISTER_TENANT", "default"),
+		Sources:            os.Getenv("REGISTER_SOURCES"),
 		WebDir:             env("REGISTER_WEB_DIR", "/web"),
 		SignInProviders:    list(os.Getenv("REGISTER_SIGNIN_PROVIDERS")),
 		SiteDir:            os.Getenv("REGISTER_SITE_DIR"),
