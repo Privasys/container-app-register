@@ -99,6 +99,9 @@ type Server struct {
 	// ConfigureSources takes the configuration document and returns the
 	// state of the external sources, as ConfigureMail does for the sender.
 	ConfigureSources func(document []byte) (string, error)
+	// Documents is the directory uploaded documents are kept in, named by
+	// their digest; empty keeps none.
+	Documents string
 	// Drafts keeps the proposals people are still writing; nil keeps none.
 	Drafts *drafts.Store
 	// Sources are the fetchers of the configured external sources, by name.
@@ -185,6 +188,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/records/{id}/history", s.wrap(s.recordHistory))
 	mux.HandleFunc("GET /api/v1/records/{id}/versions/{version}", s.wrap(s.getRecordVersion))
 
+	mux.HandleFunc("POST /api/v1/documents", s.wrap(s.uploadDocument))
 	mux.HandleFunc("GET /api/v1/drafts", s.wrap(s.listDrafts))
 	mux.HandleFunc("POST /api/v1/drafts", s.wrap(s.createDraft))
 	mux.HandleFunc("GET /api/v1/drafts/{id}", s.wrap(s.getDraft))

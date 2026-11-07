@@ -44,6 +44,9 @@ type Draft struct {
 	Workflow string         `json:"workflow"`
 	Title    string         `json:"title"`
 	Payload  map[string]any `json:"payload,omitempty"`
+	// Evidence maps a declared evidence key to the SHA-256 of the document
+	// presented, as a proposal carries it.
+	Evidence map[string]string `json:"evidence,omitempty"`
 	// Scheme is the version of the pack the draft was written against, so
 	// a draft from an earlier version can be carried over or flagged.
 	Scheme    string `json:"scheme"`
@@ -156,7 +159,7 @@ func (s *Store) Get(tenant, owner, id string) (*Draft, error) {
 
 // Save replaces a draft's title and payload, if it is still at the revision
 // the writer read; the answer is the draft at its new revision.
-func (s *Store) Save(tenant, owner, author, id string, revision int, title string, payload map[string]any) (*Draft, error) {
+func (s *Store) Save(tenant, owner, author, id string, revision int, title string, payload map[string]any, evidence map[string]string) (*Draft, error) {
 	path, err := s.path(tenant, owner, id)
 	if err != nil {
 		return nil, err
@@ -171,6 +174,9 @@ func (s *Store) Save(tenant, owner, author, id string, revision int, title strin
 		return d, ErrConflict
 	}
 	d.Title, d.Payload = title, payload
+	if evidence != nil {
+		d.Evidence = evidence
+	}
 	d.UpdatedBy, d.UpdatedAt, d.Revision = author, s.now().Unix(), d.Revision+1
 	return d, s.write(path, d)
 }

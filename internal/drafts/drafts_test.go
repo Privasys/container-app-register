@@ -23,11 +23,11 @@ func TestADraftIsSavedByRevisionAndBelongsToItsOwner(t *testing.T) {
 	}
 
 	// A colleague of the same owner carries on; a stale writer is refused.
-	saved, err := s.Save("gov", "dealer-0001", "sub-rhys", d.ID, 1, "Blue Golf", map[string]any{"model": "Golf GTI"})
+	saved, err := s.Save("gov", "dealer-0001", "sub-rhys", d.ID, 1, "Blue Golf", map[string]any{"model": "Golf GTI"}, nil)
 	if err != nil || saved.Revision != 2 || saved.UpdatedBy != "sub-rhys" {
 		t.Fatalf("save: %+v %v", saved, err)
 	}
-	if _, err := s.Save("gov", "dealer-0001", "sub-ana", d.ID, 1, "x", nil); !errors.Is(err, ErrConflict) {
+	if _, err := s.Save("gov", "dealer-0001", "sub-ana", d.ID, 1, "x", nil, nil); !errors.Is(err, ErrConflict) {
 		t.Errorf("a stale save: %v", err)
 	}
 

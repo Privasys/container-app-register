@@ -122,9 +122,10 @@ func (s *Server) getDraft(req *request) (any, error) {
 
 func (s *Server) saveDraft(req *request) (any, error) {
 	var in struct {
-		Revision int            `json:"revision"`
-		Title    string         `json:"title"`
-		Payload  map[string]any `json:"payload"`
+		Revision int               `json:"revision"`
+		Title    string            `json:"title"`
+		Payload  map[string]any    `json:"payload"`
+		Evidence map[string]string `json:"evidence"`
 	}
 	if err := decode(req.r, &in); err != nil {
 		return nil, err
@@ -147,7 +148,7 @@ func (s *Server) saveDraft(req *request) (any, error) {
 	if in.Payload == nil {
 		in.Payload = map[string]any{}
 	}
-	d, err := store.Save(req.p.Tenant, owner, req.p.Sub, current.ID, in.Revision, clipTitle(in.Title), in.Payload)
+	d, err := store.Save(req.p.Tenant, owner, req.p.Sub, current.ID, in.Revision, clipTitle(in.Title), in.Payload, in.Evidence)
 	if err != nil {
 		return nil, draftError(err)
 	}
@@ -196,7 +197,14 @@ func (s *Server) submitDraft(req *request) (any, error) {
 	if d.Revision != in.Revision {
 		return nil, draftError(drafts.ErrConflict)
 	}
-	out, err := req.reg.Propose(req.p, d.Workflow, register.ProposeRequest{Payload: d.Payload, Evidence: in.Evidence, Message: in.Message})
+	evidence := map[string]string{}
+	for k, v := range d.Evidence {
+		evidence[k] = v
+	}
+	for k, v := range in.Evidence {
+		evidence[k] = v
+	}
+	out, err := req.reg.Propose(req.p, d.Workflow, register.ProposeRequest{Payload: d.Payload, Evidence: evidence, Message: in.Message})
 	if err != nil {
 		return nil, err
 	}
