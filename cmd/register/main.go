@@ -105,6 +105,9 @@ func run(log *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		if _, err := app.configureSources(document); err != nil {
+			return err
+		}
 		server.Ready(reg, verifier)
 	}
 
@@ -172,6 +175,9 @@ type configuration struct {
 		PublicKey string `json:"public_key"`
 	} `json:"customer_kek,omitempty"`
 	CheckpointInterval string `json:"checkpoint_interval,omitempty"`
+	// Sources is read by configureSources, not here; a self-configured
+	// register takes it from REGISTER_SOURCES.
+	Sources json.RawMessage `json:"sources,omitempty"`
 }
 
 // selfConfiguration builds the document a self-configuring register
@@ -180,6 +186,12 @@ func (a *application) selfConfiguration() ([]byte, error) {
 	doc := configuration{
 		Tenant:        a.cfg.Tenant,
 		CommitmentKey: a.cfg.CommitmentKeyHex,
+	}
+	if a.cfg.Sources != "" {
+		if !json.Valid([]byte(a.cfg.Sources)) {
+			return nil, errors.New("REGISTER_SOURCES is not JSON")
+		}
+		doc.Sources = json.RawMessage(a.cfg.Sources)
 	}
 	if a.cfg.PackPath != "" {
 		raw, err := os.ReadFile(a.cfg.PackPath)
