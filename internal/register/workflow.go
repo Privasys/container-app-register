@@ -94,7 +94,7 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 		if req.ObjectID != "" {
 			return nil, fmt.Errorf("%s creates a record and takes no object", workflowName)
 		}
-		if err := class.Compiled().Validate(req.Payload); err != nil {
+		if err := class.Compiled().Validate(withPlaceholders(class, req.Payload)); err != nil {
 			return nil, fmt.Errorf("proposed record does not match the %s schema: %w", class.Name, err)
 		}
 	} else if req.ObjectID == "" {

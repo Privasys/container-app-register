@@ -95,6 +95,8 @@ type Class struct {
 	// against. Its x-register annotations decide which properties are
 	// personal data and which project into the query table.
 	Schema json.RawMessage `json:"schema"`
+	// Identifiers are the properties the register assigns on creation.
+	Identifiers []Identifier `json:"identifiers,omitempty"`
 
 	compiled *jsonschema.Schema
 }
@@ -367,6 +369,11 @@ func (p *Pack) validate() error {
 			if prop := compiled.Properties[proj.Property]; prop.Register.PII {
 				return fmt.Errorf("pack: class %q property %q is personal data and cannot be queryable: "+
 					"a projected column is plaintext in the query table", c.Name, proj.Property)
+			}
+		}
+		for i := range c.Identifiers {
+			if err := validateIdentifier(c, &c.Identifiers[i]); err != nil {
+				return fmt.Errorf("pack: %w", err)
 			}
 		}
 		p.classByName[c.Name] = c
