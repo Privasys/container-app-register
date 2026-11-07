@@ -22,6 +22,8 @@ type Affiliation struct {
 	Organisation string `json:"organisation"`
 	Admin        bool   `json:"admin"`
 	Since        int64  `json:"since"`
+	// Roles are the roles the organisation holds, which its members inherit.
+	Roles []string `json:"organisation_roles"`
 }
 
 func decodeAffiliation(row store.Row) Affiliation {
@@ -35,7 +37,11 @@ func (r *Register) affiliationsIn(tx *store.Tx, tenant, sub string) ([]Affiliati
 	}
 	out := make([]Affiliation, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, decodeAffiliation(row))
+		a := decodeAffiliation(row)
+		if a.Roles, err = r.organisationRolesIn(tx, tenant, a.Organisation); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Organisation < out[j].Organisation })
 	return out, nil
@@ -152,16 +158,11 @@ func (r *Register) OrganisationMembers(p *auth.Principal, organisation string) (
 			return err
 		}
 		for _, a := range affs {
-			rows, err := tx.Query("SELECT role FROM `members` WHERE tenant = " + store.Lit(p.Tenant) + " AND sub = " + store.Lit(a.Sub))
+			roles, err := r.rolesOf(tx, p.Tenant, a.Sub)
 			if err != nil {
 				return err
 			}
-			m := OrganisationMember{Affiliation: a, Roles: []string{}}
-			for _, row := range rows {
-				m.Roles = append(m.Roles, row.Str("role"))
-			}
-			sort.Strings(m.Roles)
-			out = append(out, m)
+			out = append(out, OrganisationMember{Affiliation: a, Roles: roles})
 		}
 		return nil
 	})

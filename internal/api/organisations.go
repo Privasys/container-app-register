@@ -45,3 +45,23 @@ func (s *Server) recordOrganisation(req *request) (any, error) {
 	}
 	return map[string]any{"object_id": id, "transaction": txn}, nil
 }
+
+// removeFromOrganisation takes a person out of an organisation, ending the
+// roles they inherited from it.
+func (s *Server) removeFromOrganisation(req *request) (any, error) {
+	txn, err := req.reg.RemoveFromOrganisation(req.p, req.r.PathValue("key"), req.r.PathValue("sub"), req.r.URL.Query().Get("reason"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}
+
+// withdrawOrganisationRole takes a role from an organisation and so from
+// all its members.
+func (s *Server) withdrawOrganisationRole(req *request) (any, error) {
+	txn, err := req.reg.WithdrawOrganisationRole(req.p, req.r.PathValue("key"), req.r.PathValue("role"), req.r.URL.Query().Get("reason"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}

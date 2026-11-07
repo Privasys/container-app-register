@@ -309,6 +309,18 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// The roles an organisation holds, which its members inherit.
+		name: "organisation_roles",
+		ddl: `CREATE TABLE ` + "`organisation_roles`" + ` (
+			tenant VARCHAR(64) NOT NULL,
+			organisation VARCHAR(191) NOT NULL,
+			role VARCHAR(64) NOT NULL,
+			since BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL,
+			PRIMARY KEY (tenant, organisation, role)
+		)`,
+	},
+	{
 		// Who belongs to which organisation, and who administers it.
 		name: "affiliations",
 		ddl: `CREATE TABLE ` + "`affiliations`" + ` (
