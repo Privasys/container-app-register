@@ -299,6 +299,32 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// The organisation an invitation brings its person into, and
+		// whether they will administer it there.
+		name: "invite_organisations",
+		ddl: `CREATE TABLE ` + "`invite_organisations`" + ` (
+			id VARCHAR(32) PRIMARY KEY,
+			organisation VARCHAR(191) NOT NULL,
+			admin BOOLEAN NOT NULL
+		)`,
+	},
+	{
+		// Who belongs to which organisation, and who administers it.
+		name: "affiliations",
+		ddl: `CREATE TABLE ` + "`affiliations`" + ` (
+			tenant VARCHAR(64) NOT NULL,
+			sub VARCHAR(256) NOT NULL,
+			organisation VARCHAR(191) NOT NULL,
+			admin BOOLEAN NOT NULL,
+			since BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL,
+			PRIMARY KEY (tenant, sub, organisation)
+		)`,
+		indexes: []string{
+			"CREATE INDEX `affiliations_organisation` ON `affiliations` (tenant, organisation)",
+		},
+	},
+	{
 		// Who an emailed invitation is for, sealed under a key of the
 		// invitation's own, which goes when the invitation is finished.
 		name: "invite_recipients",

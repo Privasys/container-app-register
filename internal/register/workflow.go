@@ -120,6 +120,19 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 			if row.Str("class") != class.Name {
 				return fmt.Errorf("%s is a %s, not a %s", req.ObjectID, row.Str("class"), class.Name)
 			}
+			if err := r.checkScope(tx, p, class, req.ObjectID); err != nil {
+				return err
+			}
+		} else if req.Payload != nil {
+			// A record proposed by a role limited to its organisation's
+			// records must be one of them.
+			ok, err := r.inScope(tx, p, class, req.Payload)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("%s may not propose this %s: it is not one of their organisation's", p.Acting, strings.ReplaceAll(class.Name, "_", " "))
+			}
 		}
 
 		taskID, err := NewTaskID()

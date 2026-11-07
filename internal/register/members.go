@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -52,6 +53,10 @@ type Invite struct {
 	UsedAt    int64  `json:"used_at,omitempty"`
 	// Status is "open", "used", "expired" or "revoked".
 	Status string `json:"status"`
+	// Organisation is the key of the organisation the person joins, and
+	// OrganisationAdmin whether they will administer it.
+	Organisation      string `json:"organisation,omitempty"`
+	OrganisationAdmin bool   `json:"organisation_admin,omitempty"`
 }
 
 // Invitation lifetimes.
@@ -289,6 +294,68 @@ func (r *Register) otherAdministrators(tx *store.Tx, tenant, except string) (int
 // -- invitations -----------------------------------------------------------
 
 // CreateInvite issues an invitation and returns its secret, once.
+// InviteRequest is everything an invitation can carry.
+type InviteRequest struct {
+	Role         string
+	Label        string
+	ValidFor     time.Duration
+	To           *InviteRecipient
+	Organisation string
+}
+
+// Invite issues an invitation. Whoever manages the register's members may
+// invite anyone to any role. An organisation's administrator may invite a
+// colleague into their own organisation, to a role they hold themselves.
+// The first person invited into an organisation will administer it.
+func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string, error) {
+	if req.To != nil && (len([]rune(req.To.Name)) > 128 || len([]rune(req.To.Organisation)) > 128) {
+		return nil, "", fmt.Errorf("a name or organisation is at most 128 characters")
+	}
+	if req.To != nil && req.Label != "" {
+		return nil, "", fmt.Errorf("an emailed invitation has no label: the name it is for is sealed")
+	}
+	var (
+		inv    *Invite
+		secret string
+	)
+	err := r.st.Do(func(tx *store.Tx) error {
+		org := (*inviteOrganisation)(nil)
+		if req.Organisation != "" {
+			exists, err := r.organisationExists(tx, p.Tenant, req.Organisation)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return fmt.Errorf("no such organisation %q: bring it in or record it first", req.Organisation)
+			}
+			affiliates, err := r.affiliatesIn(tx, p.Tenant, req.Organisation)
+			if err != nil {
+				return err
+			}
+			org = &inviteOrganisation{key: req.Organisation, admin: len(affiliates) == 0}
+		}
+		if !p.Can(auth.PermMembers) {
+			if org == nil {
+				return fmt.Errorf("%s may not manage members", p.Acting)
+			}
+			admin, err := r.isOrganisationAdmin(tx, p.Tenant, p.Sub, org.key)
+			if err != nil {
+				return err
+			}
+			if !admin {
+				return fmt.Errorf("%s may not invite into organisation %s", p.Acting, org.key)
+			}
+			if !slices.Contains(p.Roles, req.Role) {
+				return fmt.Errorf("an organisation's administrator may invite colleagues only to a role they hold")
+			}
+		}
+		var err error
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, req.Role, req.Label, req.ValidFor, req.To, org)
+		return err
+	})
+	return inv, secret, err
+}
+
 func (r *Register) CreateInvite(p *auth.Principal, role, label string, validFor time.Duration) (*Invite, string, error) {
 	if !p.Can(auth.PermMembers) {
 		return nil, "", fmt.Errorf("%s may not manage members", p.Acting)
@@ -299,7 +366,7 @@ func (r *Register) CreateInvite(p *auth.Principal, role, label string, validFor 
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor, nil)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor, nil, nil)
 		return err
 	})
 	return inv, secret, err
@@ -321,7 +388,7 @@ func (r *Register) CreateEmailedInvite(p *auth.Principal, role string, validFor 
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, "", validFor, &to)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, "", validFor, &to, nil)
 		return err
 	})
 	return inv, secret, err
@@ -337,14 +404,14 @@ func (r *Register) BootstrapInvite(role string, validFor time.Duration) (*Invite
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
 		inv, secret, err = r.createInvite(tx, r.systemAuthor("configure"), r.opts.Tenant, role,
-			"First administrator", validFor, nil)
+			"First administrator", validFor, nil, nil)
 		return err
 	})
 	return inv, secret, err
 }
 
 func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role, label string,
-	validFor time.Duration, to *InviteRecipient) (*Invite, string, error) {
+	validFor time.Duration, to *InviteRecipient, org *inviteOrganisation) (*Invite, string, error) {
 	spec := r.pk.Model().Role(role)
 	if spec == nil {
 		return nil, "", fmt.Errorf("no such role %q", role)
@@ -391,6 +458,13 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 			"used_by": "", "used_at": int64(0), "revoked": false, "txid": model.TxIDPlaceholder,
 		},
 	}}
+	if org != nil {
+		inv.Organisation, inv.OrganisationAdmin = org.key, org.admin
+		ops = append(ops, model.WriteOp{
+			Table: "invite_organisations", Key: map[string]any{"id": inv.ID},
+			Values: map[string]any{"organisation": org.key, "admin": org.admin},
+		})
+	}
 	if to != nil {
 		sealed := *to
 		sealed.Secret = secret
@@ -405,6 +479,20 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 		return nil, "", err
 	}
 	return inv, secret, nil
+}
+
+type inviteOrganisation struct {
+	key   string
+	admin bool
+}
+
+func (r *Register) inviteOrganisationOf(tx *store.Tx, inv *Invite) error {
+	row, err := tx.QueryOne("SELECT organisation, admin FROM `invite_organisations` WHERE id = " + store.Lit(inv.ID))
+	if err != nil || row == nil {
+		return err
+	}
+	inv.Organisation, inv.OrganisationAdmin = row.Str("organisation"), row.Bool("admin")
+	return nil
 }
 
 func (r *Register) decodeInvite(row store.Row) *Invite {
@@ -503,6 +591,9 @@ func (r *Register) openInvite(tx *store.Tx, tenant, id, secret string) (*Invite,
 	if inv.Status != "open" {
 		return nil, ErrInvite
 	}
+	if err := r.inviteOrganisationOf(tx, inv); err != nil {
+		return nil, err
+	}
 	return inv, nil
 }
 
@@ -543,6 +634,12 @@ func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model
 		forget, scope, err := r.forgetRecipient(tx, id, at)
 		if err != nil {
 			return err
+		}
+		if inv.Organisation != "" {
+			forget = append(forget, model.WriteOp{
+				Table: "affiliations", Key: map[string]any{"tenant": tenant, "sub": sub, "organisation": inv.Organisation},
+				Values: map[string]any{"admin": inv.OrganisationAdmin, "since": at, "txid": model.TxIDPlaceholder},
+			})
 		}
 		txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Role: "invitee"}, tenant, sub,
 			inv.Role, fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy),

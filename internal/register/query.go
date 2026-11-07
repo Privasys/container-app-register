@@ -56,6 +56,15 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 		projections[proj.Column] = true
 	}
 	clauses := []string{"o.tenant = " + store.Lit(p.Tenant), "o.class = " + store.Lit(class.Name)}
+	if err := r.st.Do(func(tx *store.Tx) error {
+		clause, err := r.scopeClause(tx, p, class)
+		if clause != "" {
+			clauses = append(clauses, clause)
+		}
+		return err
+	}); err != nil {
+		return nil, err
+	}
 	if f.Status != "" {
 		clauses = append(clauses, "o.status = "+store.Lit(f.Status))
 	}
@@ -137,6 +146,9 @@ func (r *Register) GetObject(p *auth.Principal, objectID string) (*RecordView, e
 		if !p.CanOn(auth.PermRead, class.Name) {
 			return fmt.Errorf("%s may not read %s records", p.Acting, class.Name)
 		}
+		if err := r.checkScope(tx, p, class, objectID); err != nil {
+			return err
+		}
 		version, err := r.versionAt(tx, p, class, objectID, obj.HeadVersion)
 		if err != nil {
 			return err
@@ -159,6 +171,9 @@ func (r *Register) GetVersion(p *auth.Principal, objectID string, version uint64
 		class := r.pk.Class(obj.Class)
 		if class == nil || !p.CanOn(auth.PermRead, obj.Class) {
 			return fmt.Errorf("%s may not read %s records", p.Acting, obj.Class)
+		}
+		if err := r.checkScope(tx, p, class, objectID); err != nil {
+			return err
 		}
 		v, err := r.versionAt(tx, p, class, objectID, version)
 		if err != nil {
@@ -204,6 +219,9 @@ func (r *Register) History(p *auth.Principal, objectID string) ([]HistoryEntry, 
 		class := r.pk.Class(row.Str("class"))
 		if class == nil || !p.CanOn(auth.PermRead, row.Str("class")) {
 			return fmt.Errorf("%s may not read %s records", p.Acting, row.Str("class"))
+		}
+		if err := r.checkScope(tx, p, class, objectID); err != nil {
+			return err
 		}
 		versions, err := tx.Query("SELECT * FROM `record_versions` WHERE object_id = " +
 			store.Lit(objectID) + " ORDER BY version DESC")

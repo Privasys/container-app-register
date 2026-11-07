@@ -293,6 +293,11 @@ func (s *Server) me(req *request) (any, error) {
 		}
 	}
 	out["imports"] = imports
+	affiliations, err := req.reg.Affiliations(req.p.Tenant, req.p.Sub)
+	if err != nil {
+		return nil, err
+	}
+	out["affiliations"] = affiliations
 	out["role_titles"] = titles
 	return out, nil
 }
@@ -356,16 +361,23 @@ func (s *Server) createInvite(req *request) (any, error) {
 		Email        string `json:"email"`
 		Name         string `json:"name"`
 		Organisation string `json:"organisation"`
+		// OrganisationKey names the organisation record the person joins.
+		OrganisationKey string `json:"organisation_key"`
 	}
 	if err := decode(req.r, &in); err != nil {
 		return nil, err
 	}
-	if in.Email != "" {
-		return s.emailInvite(req, in.Role, in.Label, in.ValidDays, register.InviteRecipient{
-			Email: strings.TrimSpace(in.Email), Name: strings.TrimSpace(in.Name), Organisation: strings.TrimSpace(in.Organisation),
-		})
+	ir := register.InviteRequest{
+		Role: in.Role, Label: in.Label, ValidFor: time.Duration(in.ValidDays) * 24 * time.Hour,
+		Organisation: strings.TrimSpace(in.OrganisationKey),
 	}
-	inv, secret, err := req.reg.CreateInvite(req.p, in.Role, in.Label, time.Duration(in.ValidDays)*24*time.Hour)
+	if in.Email != "" {
+		ir.To = &register.InviteRecipient{
+			Email: strings.TrimSpace(in.Email), Name: strings.TrimSpace(in.Name), Organisation: strings.TrimSpace(in.Organisation),
+		}
+		return s.emailInvite(req, ir)
+	}
+	inv, secret, err := req.reg.Invite(req.p, ir)
 	if err != nil {
 		return nil, err
 	}
@@ -378,10 +390,11 @@ func (s *Server) createInvite(req *request) (any, error) {
 // does not depend on the email: when the send fails the invitation
 // stands, and the link is served so the administrator can pass it on.
 // When it succeeds the link is not served, since nobody else needs it.
-func (s *Server) emailInvite(req *request, role, label string, validDays int, to register.InviteRecipient) (any, error) {
-	if label != "" {
+func (s *Server) emailInvite(req *request, ir register.InviteRequest) (any, error) {
+	if ir.Label != "" {
 		return nil, errors.New("an emailed invitation has no label: the name it is for is sealed")
 	}
+	to := *ir.To
 	if !mail.ValidAddress(to.Email) {
 		return nil, errors.New("that is not a usable email address")
 	}
@@ -389,7 +402,7 @@ func (s *Server) emailInvite(req *request, role, label string, validDays int, to
 	if mailer == nil {
 		return nil, errors.New("this register has no email sender configured; issue a link instead")
 	}
-	inv, secret, err := req.reg.CreateEmailedInvite(req.p, role, time.Duration(validDays)*24*time.Hour, to)
+	inv, secret, err := req.reg.Invite(req.p, ir)
 	if err != nil {
 		return nil, err
 	}
@@ -409,6 +422,10 @@ func (s *Server) InvitationEmail(reg *register.Register, inv *register.Invite, t
 	out := mail.Invitation{
 		To: to.Email, Name: to.Name, Organisation: to.Organisation, RoleTitle: inv.Role,
 		Link: s.inviteLink(inv.ID, to.Secret), ExpiresAt: inv.ExpiresAt, Reminder: reminder,
+		OrganisationAdmin: inv.OrganisationAdmin,
+	}
+	if out.Organisation == "" && inv.Organisation != "" {
+		out.Organisation = reg.OrganisationName(reg.Options().Tenant, inv.Organisation)
 	}
 	if spec := reg.Pack().Model().Role(inv.Role); spec != nil {
 		out.RoleSummary = spec.Summary

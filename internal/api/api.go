@@ -168,6 +168,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/invites", s.wrap(s.createInvite))
 	mux.HandleFunc("DELETE /api/v1/invites/{id}", s.wrap(s.revokeInvite))
 	mux.HandleFunc("GET /api/v1/members", s.wrap(s.listMembers))
+	mux.HandleFunc("POST /api/v1/organisations", s.wrap(s.recordOrganisation))
+	mux.HandleFunc("GET /api/v1/organisations/{key}/members", s.wrap(s.organisationMembers))
+	mux.HandleFunc("POST /api/v1/organisations/{key}/admins", s.wrap(s.setOrganisationAdmin))
 	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
 	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
 
