@@ -46,6 +46,10 @@ func (r *Register) createOps(tx *store.Tx, w *writeCtx, class *pack.Class, paylo
 	if err != nil {
 		return "", nil, err
 	}
+	minted, err := r.mintIdentifiers(tx, w, class, payload)
+	if err != nil {
+		return "", nil, err
+	}
 	schemaID, err := r.activeSchemaID(tx, class.Name)
 	if err != nil {
 		return "", nil, err
@@ -57,6 +61,7 @@ func (r *Register) createOps(tx *store.Tx, w *writeCtx, class *pack.Class, paylo
 	if err != nil {
 		return "", nil, err
 	}
+	ops = append(minted, ops...)
 	w.pending[objectID] = class.Name
 	return objectID, ops, nil
 }
