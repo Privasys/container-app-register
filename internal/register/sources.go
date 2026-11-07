@@ -111,12 +111,12 @@ func (r *Register) DescribeSource(p *auth.Principal, name, key string, doc map[s
 	}
 	out := &SourceRecord{Source: src.Name, Key: key}
 	err = r.st.Do(func(tx *store.Tx) error {
-		return r.describeSource(tx, p.Tenant, src, key, doc, out)
+		return r.describeSource(tx, p, p.Tenant, src, key, doc, out)
 	})
 	return out, err
 }
 
-func (r *Register) describeSource(tx *store.Tx, tenant string, src *pack.Source, key string, doc map[string]any, out *SourceRecord) error {
+func (r *Register) describeSource(tx *store.Tx, p *auth.Principal, tenant string, src *pack.Source, key string, doc map[string]any, out *SourceRecord) error {
 	payload, status, err := MapSource(r.pk, src, doc)
 	if err != nil {
 		return err
@@ -126,6 +126,15 @@ func (r *Register) describeSource(tx *store.Tx, tenant string, src *pack.Source,
 		return fmt.Errorf("%s answered for %q when asked for %q", src.Name, got, key)
 	}
 	out.Payload, out.Status = payload, status
+	if p != nil {
+		ok, err := r.inScope(tx, p, class, payload)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("%s may not bring in this %s: it is not one of their organisation's", p.Acting, strings.ReplaceAll(class.Name, "_", " "))
+		}
+	}
 	row, err := tx.QueryOne("SELECT id, status FROM `objects` WHERE tenant = " + store.Lit(tenant) +
 		" AND class = " + store.Lit(class.Name) + " AND natural_key = " + store.Lit(key))
 	if err != nil || row == nil {
@@ -158,7 +167,7 @@ func (r *Register) ImportFromSource(p *auth.Principal, name, key string, doc map
 	out := &SourceRecord{Source: src.Name, Key: key}
 	var txn *model.Transaction
 	err = r.st.Do(func(tx *store.Tx) error {
-		if err := r.describeSource(tx, p.Tenant, src, key, doc, out); err != nil {
+		if err := r.describeSource(tx, p, p.Tenant, src, key, doc, out); err != nil {
 			return err
 		}
 		if out.Current {

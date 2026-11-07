@@ -132,6 +132,8 @@ type Invitation struct {
 	Link      string
 	ExpiresAt int64
 	Reminder  bool
+	// OrganisationAdmin says the person will administer their organisation.
+	OrganisationAdmin bool
 }
 
 // Mailer sends through one app registration.
@@ -175,7 +177,7 @@ func (m *Mailer) render(inv Invitation) (string, string, error) {
 		"BaseURL": base, "AcceptURL": base + inv.Link,
 		"RecipientName": inv.Name, "InvitedBy": s.Office, "RoleTitle": inv.RoleTitle,
 		"RoleSummary": inv.RoleSummary, "OrganisationName": first(inv.Organisation, s.Organisation),
-		"OrganisationAdmin": false, "SignInMethod": s.SignInMethod, "SupportEmail": s.SupportEmail,
+		"OrganisationAdmin": inv.OrganisationAdmin, "SignInMethod": s.SignInMethod, "SupportEmail": s.SupportEmail,
 		"ExpiresOn": time.Unix(inv.ExpiresAt, 0).UTC().Format("2 January 2006"),
 		"Reminder":  inv.Reminder, "TestNotice": !s.Production,
 	})

@@ -25,18 +25,20 @@ import (
 
 // Pack is one register's declarative definition.
 type Pack struct {
-	Name        string             `json:"name"`
-	Title       string             `json:"title"`
-	Version     string             `json:"version"`
-	Description string             `json:"description,omitempty"`
-	Tenant      string             `json:"tenant,omitempty"`
-	Roles       []auth.RoleSpec    `json:"roles"`
-	Classes     []*Class           `json:"classes"`
-	Workflows   []*Workflow        `json:"workflows"`
-	Queries     []*NamedQuery      `json:"queries,omitempty"`
-	Retention   []*RetentionPolicy `json:"retention,omitempty"`
-	Seed        *Seed              `json:"seed,omitempty"`
-	Sources     []*Source          `json:"sources,omitempty"`
+	Name          string             `json:"name"`
+	Title         string             `json:"title"`
+	Version       string             `json:"version"`
+	Description   string             `json:"description,omitempty"`
+	Tenant        string             `json:"tenant,omitempty"`
+	Roles         []auth.RoleSpec    `json:"roles"`
+	Classes       []*Class           `json:"classes"`
+	Workflows     []*Workflow        `json:"workflows"`
+	Queries       []*NamedQuery      `json:"queries,omitempty"`
+	Retention     []*RetentionPolicy `json:"retention,omitempty"`
+	Seed          *Seed              `json:"seed,omitempty"`
+	Sources       []*Source          `json:"sources,omitempty"`
+	Organisations *Organisations     `json:"organisations,omitempty"`
+	Scopes        []*Scope           `json:"scopes,omitempty"`
 
 	classByName    map[string]*Class
 	workflowByName map[string]*Workflow
@@ -498,6 +500,9 @@ func (p *Pack) validate() error {
 			return fmt.Errorf("pack: %w", err)
 		}
 		p.sourceByName[src.Name] = src
+	}
+	if err := p.validateScopes(); err != nil {
+		return fmt.Errorf("pack: %w", err)
 	}
 	return nil
 }

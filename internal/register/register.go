@@ -141,21 +141,23 @@ func (r *Register) now() int64 { return r.opts.Now().UTC().Unix() }
 // touch. A write set that names anything else is refused: the log
 // describes changes to the register's own state, and nothing else.
 var pkColumns = map[string][]string{
-	"objects":           {"id"},
-	"natural_keys":      {"tenant", "class", "natural_key"},
-	"record_versions":   {"object_id", "version"},
-	"schemas":           {"id"},
-	"policies":          {"id"},
-	"tasks":             {"id"},
-	"keks":              {"id"},
-	"dek_keys":          {"scope"},
-	"prune_marks":       {"txid", "idx"},
-	"webhooks":          {"id"},
-	"members":           {"id"},
-	"profiles":          {"sub"},
-	"invites":           {"id"},
-	"invite_recipients": {"id"},
-	"registry":          {"k"},
+	"objects":              {"id"},
+	"natural_keys":         {"tenant", "class", "natural_key"},
+	"record_versions":      {"object_id", "version"},
+	"schemas":              {"id"},
+	"policies":             {"id"},
+	"tasks":                {"id"},
+	"keks":                 {"id"},
+	"dek_keys":             {"scope"},
+	"prune_marks":          {"txid", "idx"},
+	"webhooks":             {"id"},
+	"members":              {"id"},
+	"profiles":             {"sub"},
+	"invites":              {"id"},
+	"invite_recipients":    {"id"},
+	"invite_organisations": {"id"},
+	"affiliations":         {"tenant", "sub", "organisation"},
+	"registry":             {"k"},
 }
 
 func keyColumnsFor(table string) ([]string, bool) {
