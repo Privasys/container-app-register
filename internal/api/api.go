@@ -38,6 +38,7 @@ import (
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/mail"
 	"github.com/Privasys/container-app-register/internal/register"
+	"github.com/Privasys/container-app-register/internal/source"
 	"github.com/Privasys/container-app-register/internal/webhook"
 )
 
@@ -94,6 +95,11 @@ type Server struct {
 	ConfigureMail func(document []byte) (string, error)
 	// Mailer is the email sender; nil until one is configured.
 	Mailer atomic.Pointer[mail.Mailer]
+	// ConfigureSources takes the configuration document and returns the
+	// state of the external sources, as ConfigureMail does for the sender.
+	ConfigureSources func(document []byte) (string, error)
+	// Sources are the fetchers of the configured external sources, by name.
+	Sources atomic.Pointer[map[string]source.Fetcher]
 	// SiteDir holds an adopter site: public pages, shells and static
 	// files an image built on the register puts in front of it. Empty,
 	// the console takes the root as it always has. See LoadSite.
@@ -164,6 +170,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/members", s.wrap(s.listMembers))
 	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
 	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
+
+	mux.HandleFunc("GET /api/v1/sources/{name}/{key}", s.wrap(s.describeSource))
+	mux.HandleFunc("POST /api/v1/sources/{name}/{key}/import", s.wrap(s.importFromSource))
 
 	mux.HandleFunc("GET /api/v1/records", s.wrap(s.listRecords))
 	mux.HandleFunc("GET /api/v1/records/{id}", s.wrap(s.getRecord))
