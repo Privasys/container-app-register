@@ -47,6 +47,12 @@ func newHarnessIn(t *testing.T, dir string) *harness {
 	if err != nil {
 		t.Fatalf("read pack: %v", err)
 	}
+	return newHarnessWith(t, dir, doc)
+}
+
+// newHarnessWith runs a register on a pack document of the test's own.
+func newHarnessWith(t *testing.T, dir string, doc []byte) *harness {
+	t.Helper()
 	loaded, err := pack.Load(doc)
 	if err != nil {
 		t.Fatalf("load pack: %v", err)

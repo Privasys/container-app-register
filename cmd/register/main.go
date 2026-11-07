@@ -89,6 +89,7 @@ func run(log *slog.Logger) error {
 	app := &application{cfg: cfg, log: log, material: material, server: server}
 	server.Configure = app.configure
 	server.ConfigureMail = app.configureMail
+	server.ConfigureSources = app.configureSources
 	server.Standby = app.standbyStatus
 	server.Deliveries = app.deliveries
 

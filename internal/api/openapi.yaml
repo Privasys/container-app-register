@@ -205,6 +205,29 @@ paths:
       responses:
         "200": { description: OK }
 
+  /api/v1/sources/{name}/{key}:
+    get:
+      tags: [Sources]
+      summary: What an external source holds for a key, mapped onto a record, and whether the register already holds it
+      description: Fetches from the source the configure call named (a mock in testing). Records nothing. Only the roles the pack names for the source may ask.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The record as the source describes it }
+        "404": { description: The source holds no such record }
+
+  /api/v1/sources/{name}/{key}/import:
+    post:
+      tags: [Sources]
+      summary: Record what the source holds for a key, as the register's own act on the source's authority
+      description: Creates the record, adds a version when the source has changed it, or records nothing when the register is already current. No approval is needed, because the source is the master of these facts.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The record and the transaction, which is null when nothing changed }
+
   /api/v1/records:
     get:
       tags: [Records]

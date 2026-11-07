@@ -36,10 +36,12 @@ type Pack struct {
 	Queries     []*NamedQuery      `json:"queries,omitempty"`
 	Retention   []*RetentionPolicy `json:"retention,omitempty"`
 	Seed        *Seed              `json:"seed,omitempty"`
+	Sources     []*Source          `json:"sources,omitempty"`
 
 	classByName    map[string]*Class
 	workflowByName map[string]*Workflow
 	queryByName    map[string]*NamedQuery
+	sourceByName   map[string]*Source
 	model          *auth.Model
 }
 
@@ -486,6 +488,17 @@ func (p *Pack) validate() error {
 			}
 		}
 	}
+
+	p.sourceByName = map[string]*Source{}
+	for _, src := range p.Sources {
+		if _, dup := p.sourceByName[src.Name]; dup {
+			return fmt.Errorf("pack: duplicate source %q", src.Name)
+		}
+		if err := p.validateSource(src); err != nil {
+			return fmt.Errorf("pack: %w", err)
+		}
+		p.sourceByName[src.Name] = src
+	}
 	return nil
 }
 
@@ -564,6 +577,9 @@ func (p *Pack) Workflow(name string) *Workflow { return p.workflowByName[name] }
 
 // Query looks up a saved query by name.
 func (p *Pack) Query(name string) *NamedQuery { return p.queryByName[name] }
+
+// Source returns the named source, or nil.
+func (p *Pack) Source(name string) *Source { return p.sourceByName[name] }
 
 // WorkflowsFor lists the workflows over one class, in name order.
 func (p *Pack) WorkflowsFor(class string) []*Workflow {

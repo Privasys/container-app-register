@@ -165,18 +165,21 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// configureMail hands the configuration to whatever keeps the sender.
-// What it reports names the state of the sender and never its secret.
+// configureMail hands the configuration to whatever keeps the email
+// sender and the external sources. What it reports names their state and
+// never a secret.
 func (s *Server) configureMail(body []byte, out map[string]any) error {
-	if s.ConfigureMail == nil {
-		return nil
-	}
-	state, err := s.ConfigureMail(body)
-	if err != nil {
-		return err
-	}
-	if state != "" {
-		out["mail"] = state
+	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources} {
+		if apply == nil {
+			continue
+		}
+		state, err := apply(body)
+		if err != nil {
+			return err
+		}
+		if state != "" {
+			out[key] = state
+		}
 	}
 	return nil
 }
