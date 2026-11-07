@@ -97,6 +97,7 @@ func run(log *slog.Logger) error {
 		if server.Drafts, err = drafts.Open(filepath.Join(cfg.DataDir, "drafts")); err != nil {
 			return err
 		}
+		server.Documents = filepath.Join(cfg.DataDir, "documents")
 	}
 	server.Standby = app.standbyStatus
 	server.Deliveries = app.deliveries
