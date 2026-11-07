@@ -177,6 +177,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/organisations", s.wrap(s.recordOrganisation))
 	mux.HandleFunc("GET /api/v1/organisations/{key}/members", s.wrap(s.organisationMembers))
 	mux.HandleFunc("POST /api/v1/organisations/{key}/admins", s.wrap(s.setOrganisationAdmin))
+	mux.HandleFunc("DELETE /api/v1/organisations/{key}/members/{sub}", s.wrap(s.removeFromOrganisation))
+	mux.HandleFunc("DELETE /api/v1/organisations/{key}/roles/{role}", s.wrap(s.withdrawOrganisationRole))
 	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
 	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
 

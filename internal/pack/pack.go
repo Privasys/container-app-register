@@ -498,6 +498,19 @@ func (p *Pack) validate() error {
 		}
 	}
 
+	for _, role := range p.Roles {
+		switch role.Held {
+		case "", "person", "organisation", "either", "appointment":
+		default:
+			return fmt.Errorf("pack: role %s is held in an unknown way %q", role.Name, role.Held)
+		}
+		if role.Held == "organisation" || role.Held == "either" {
+			if p.Organisations == nil {
+				return fmt.Errorf("pack: role %s is held by organisations, but the pack names none", role.Name)
+			}
+		}
+	}
+
 	p.sourceByName = map[string]*Source{}
 	for _, src := range p.Sources {
 		if _, dup := p.sourceByName[src.Name]; dup {

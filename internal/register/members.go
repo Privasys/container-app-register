@@ -74,22 +74,17 @@ func memberID(tenant, sub, role string) string { return tenant + "|" + sub + "|"
 
 // GrantedRoles lists the roles this register granted to a subject. It
 // takes no principal: it is how a principal comes to exist.
+//
+// A person holds the roles granted to them and every role of each
+// organisation they belong to.
 func (r *Register) GrantedRoles(tenant, sub string) ([]string, string, error) {
-	rows, err := r.st.Query("SELECT role, display FROM `members` WHERE tenant = " + store.Lit(tenant) +
-		" AND sub = " + store.Lit(sub))
-	if err != nil {
-		return nil, "", err
-	}
-	roles := make([]string, 0, len(rows))
-	display := ""
-	for _, row := range rows {
-		roles = append(roles, row.Str("role"))
-		if display == "" {
-			display = row.Str("display")
-		}
-	}
-	sort.Strings(roles)
-	return roles, display, nil
+	var roles []string
+	err := r.st.Do(func(tx *store.Tx) error {
+		var err error
+		roles, err = r.rolesOf(tx, tenant, sub)
+		return err
+	})
+	return roles, "", err
 }
 
 // MembersRole names the role an unattended grant gives the first
@@ -193,13 +188,11 @@ func (r *Register) grant(tx *store.Tx, kind string, author model.Author, tenant,
 	if spec == nil {
 		return nil, fmt.Errorf("no such role %q", role)
 	}
-	held, err := tx.Query("SELECT role, display FROM `members` WHERE tenant = " + store.Lit(tenant) +
-		" AND sub = " + store.Lit(sub))
+	held, err := r.rolesOf(tx, tenant, sub)
 	if err != nil {
 		return nil, err
 	}
-	for _, row := range held {
-		other := row.Str("role")
+	for _, other := range held {
 		if other == role {
 			return nil, fmt.Errorf("%s is already registered as %s", clip(sub, 24), role)
 		}
@@ -335,6 +328,9 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 			org = &inviteOrganisation{key: req.Organisation, admin: len(affiliates) == 0}
 		}
 		if !p.Can(auth.PermMembers) {
+			// An organisation's administrator invites colleagues into the
+			// organisation, where they inherit its roles. Personal roles
+			// are granted by whoever manages members.
 			if org == nil {
 				return fmt.Errorf("%s may not manage members", p.Acting)
 			}
@@ -345,8 +341,23 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 			if !admin {
 				return fmt.Errorf("%s may not invite into organisation %s", p.Acting, org.key)
 			}
-			if !slices.Contains(p.Roles, req.Role) {
-				return fmt.Errorf("an organisation's administrator may invite colleagues only to a role they hold")
+			if req.Role != "" {
+				held, err := r.organisationRolesIn(tx, p.Tenant, org.key)
+				if err != nil {
+					return err
+				}
+				if !slices.Contains(held, req.Role) {
+					return fmt.Errorf("an organisation's administrator invites colleagues into the organisation, to share its roles; %s is not one of them", req.Role)
+				}
+				req.Role = ""
+			}
+		}
+		if req.Role == "" && org == nil {
+			return fmt.Errorf("an invitation names a role, an organisation, or both")
+		}
+		if req.Role != "" {
+			if _, err := r.roleKind(req.Role, org != nil); err != nil {
+				return err
 			}
 		}
 		var err error
@@ -413,6 +424,9 @@ func (r *Register) BootstrapInvite(role string, validFor time.Duration) (*Invite
 func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role, label string,
 	validFor time.Duration, to *InviteRecipient, org *inviteOrganisation) (*Invite, string, error) {
 	spec := r.pk.Model().Role(role)
+	if role == "" && org != nil {
+		spec = &auth.RoleSpec{Name: "", Title: "member of organisation " + org.key}
+	}
 	if spec == nil {
 		return nil, "", fmt.Errorf("no such role %q", role)
 	}
@@ -635,15 +649,57 @@ func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model
 		if err != nil {
 			return err
 		}
+		ops := append([]model.WriteOp{spend}, forget...)
+		kind := ""
+		if inv.Role != "" {
+			if kind, err = r.roleKind(inv.Role, inv.Organisation != ""); err != nil {
+				return err
+			}
+		}
 		if inv.Organisation != "" {
-			forget = append(forget, model.WriteOp{
+			ops = append(ops, model.WriteOp{
 				Table: "affiliations", Key: map[string]any{"tenant": tenant, "sub": sub, "organisation": inv.Organisation},
 				Values: map[string]any{"admin": inv.OrganisationAdmin, "since": at, "txid": model.TxIDPlaceholder},
 			})
+			// Joining brings every role the organisation holds, and with an
+			// organisation role, the organisation takes it on; the person
+			// must be able to hold all of them together.
+			orgRoles, err := r.organisationRolesIn(tx, tenant, inv.Organisation)
+			if err != nil {
+				return err
+			}
+			if kind == HeldByOrganisation && !slices.Contains(orgRoles, inv.Role) {
+				orgRoles = append(orgRoles, inv.Role)
+				ops = append(ops, model.WriteOp{
+					Table: "organisation_roles", Key: map[string]any{"tenant": tenant, "organisation": inv.Organisation, "role": inv.Role},
+					Values: map[string]any{"since": at, "txid": model.TxIDPlaceholder},
+				})
+			}
+			mine, err := r.rolesOf(tx, tenant, sub)
+			if err != nil {
+				return err
+			}
+			all := append(append([]string{}, mine...), orgRoles...)
+			if kind == HeldByPerson {
+				all = append(all, inv.Role)
+			}
+			if err := r.checkCompatible(sub, all); err != nil {
+				return err
+			}
 		}
-		txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Role: "invitee"}, tenant, sub,
-			inv.Role, fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy),
-			append([]model.WriteOp{spend}, forget...))
+		reason := fmt.Sprintf("Invitation %s, issued by %s.", inv.ID, inv.CreatedBy)
+		if kind == HeldByPerson {
+			txn, err = r.grant(tx, model.KindInviteRedeem, model.Author{Sub: sub, Role: "invitee"}, tenant, sub, inv.Role, reason, ops)
+		} else {
+			summary := fmt.Sprintf("%s joins organisation %s", clip(sub, 16), inv.Organisation)
+			if kind == HeldByOrganisation {
+				summary = fmt.Sprintf("%s joins organisation %s as %s", clip(sub, 16), inv.Organisation, inv.Role)
+			}
+			txn, err = r.commit(tx, model.Envelope{
+				Kind: model.KindInviteRedeem, Tenant: tenant, Author: model.Author{Sub: sub, Role: "invitee"}, Timestamp: at,
+				Message: composeMessage(clip(summary, model.MaxSummary), reason),
+			}, ops)
+		}
 		if err == nil {
 			inv.UsedBy, inv.UsedAt, inv.Status = sub, at, "used"
 			if scope != "" {

@@ -36,6 +36,12 @@ type RoleSpec struct {
 	Title string `json:"title,omitempty"`
 	// Summary says what the role does, in a sentence an invitation can carry.
 	Summary string `json:"summary,omitempty"`
+	// Held says how the role is held: "person" (the default), granted to
+	// one named person; "organisation", held by an organisation whose
+	// members inherit it; "either", by an organisation when granted with
+	// one and by the person otherwise; "appointment", given by an
+	// appointment the register records and never by an invitation.
+	Held string `json:"held,omitempty"`
 	// OIDCRoles are the identity-provider roles that grant this role.
 	OIDCRoles []string `json:"oidc_roles"`
 	// Permissions are the verbs this role carries.
