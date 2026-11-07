@@ -36,6 +36,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Privasys/container-app-register/internal/auth"
+	"github.com/Privasys/container-app-register/internal/drafts"
 	"github.com/Privasys/container-app-register/internal/mail"
 	"github.com/Privasys/container-app-register/internal/register"
 	"github.com/Privasys/container-app-register/internal/source"
@@ -98,6 +99,8 @@ type Server struct {
 	// ConfigureSources takes the configuration document and returns the
 	// state of the external sources, as ConfigureMail does for the sender.
 	ConfigureSources func(document []byte) (string, error)
+	// Drafts keeps the proposals people are still writing; nil keeps none.
+	Drafts *drafts.Store
 	// Sources are the fetchers of the configured external sources, by name.
 	Sources atomic.Pointer[map[string]source.Fetcher]
 	// SiteDir holds an adopter site: public pages, shells and static
@@ -181,6 +184,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/records/{id}", s.wrap(s.getRecord))
 	mux.HandleFunc("GET /api/v1/records/{id}/history", s.wrap(s.recordHistory))
 	mux.HandleFunc("GET /api/v1/records/{id}/versions/{version}", s.wrap(s.getRecordVersion))
+
+	mux.HandleFunc("GET /api/v1/drafts", s.wrap(s.listDrafts))
+	mux.HandleFunc("POST /api/v1/drafts", s.wrap(s.createDraft))
+	mux.HandleFunc("GET /api/v1/drafts/{id}", s.wrap(s.getDraft))
+	mux.HandleFunc("PUT /api/v1/drafts/{id}", s.wrap(s.saveDraft))
+	mux.HandleFunc("DELETE /api/v1/drafts/{id}", s.wrap(s.deleteDraft))
+	mux.HandleFunc("POST /api/v1/drafts/{id}/submit", s.wrap(s.submitDraft))
 
 	mux.HandleFunc("GET /api/v1/tasks", s.wrap(s.listTasks))
 	mux.HandleFunc("GET /api/v1/tasks/{id}", s.wrap(s.getTask))
