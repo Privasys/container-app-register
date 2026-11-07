@@ -32,6 +32,7 @@ import (
 	"github.com/Privasys/container-app-register/internal/api"
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/config"
+	"github.com/Privasys/container-app-register/internal/drafts"
 	"github.com/Privasys/container-app-register/internal/keys"
 	"github.com/Privasys/container-app-register/internal/pack"
 	"github.com/Privasys/container-app-register/internal/platform"
@@ -90,6 +91,13 @@ func run(log *slog.Logger) error {
 	server.Configure = app.configure
 	server.ConfigureMail = app.configureMail
 	server.ConfigureSources = app.configureSources
+	if cfg.Mode != config.ModeStandby {
+		// Drafts sit on the sealed volume beside the store, outside the
+		// ledger; a standby keeps none, and a failover loses only drafts.
+		if server.Drafts, err = drafts.Open(filepath.Join(cfg.DataDir, "drafts")); err != nil {
+			return err
+		}
+	}
 	server.Standby = app.standbyStatus
 	server.Deliveries = app.deliveries
 
