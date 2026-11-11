@@ -9,15 +9,12 @@ import (
 )
 
 // Organisations names the class whose records are the organisations people
-// belong to: the legal entities they are invited from. A person's
+// belong to: the legal entities they are invited from. A person belongs to
+// one organisation at a time, and acts for it. A person's
 // affiliations are recorded when they accept an invitation that names one,
 // and scopes read them.
 type Organisations struct {
 	Class string `json:"class"`
-	// Single limits a person to one organisation: an invitation into a
-	// second one is refused when it is accepted. A register whose rules for
-	// people in several organisations are not settled yet starts here.
-	Single bool `json:"single,omitempty"`
 }
 
 // Scope limits what a role sees and does in one class to the records of

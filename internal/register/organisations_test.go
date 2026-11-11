@@ -238,14 +238,8 @@ func TestOrganisationAdministrators(t *testing.T) {
 	}
 }
 
-func TestOneOrganisationOnlyWhenThePackSaysSo(t *testing.T) {
-	var doc map[string]any
-	if err := json.Unmarshal(carPackWithOrganisations(t), &doc); err != nil {
-		t.Fatal(err)
-	}
-	doc["organisations"] = map[string]any{"class": "owner", "single": true}
-	single, _ := json.Marshal(doc)
-	h := newHarnessWith(t, t.TempDir(), single)
+func TestAPersonBelongsToOneOrganisation(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithOrganisations(t))
 	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
 	operator := h.principal("operator-1", "operator")
 
@@ -278,15 +272,5 @@ func TestOneOrganisationOnlyWhenThePackSaysSo(t *testing.T) {
 	}
 	if affs, _ := h.reg.Affiliations("gov", "sub-one"); len(affs) != 1 || affs[0].Organisation != "ORG-SOUTH" {
 		t.Fatalf("affiliations after moving %+v", affs)
-	}
-}
-
-func TestSeveralOrganisationsByDefault(t *testing.T) {
-	h := newHarnessWith(t, t.TempDir(), carPackWithOrganisations(t))
-	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
-	join(t, h, "operator-1", "sub-two", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
-	join(t, h, "operator-1", "sub-two", register.InviteRequest{Organisation: "ORG-SOUTH"})
-	if affs, _ := h.reg.Affiliations("gov", "sub-two"); len(affs) != 2 {
-		t.Fatalf("affiliations %+v", affs)
 	}
 }

@@ -70,8 +70,8 @@ const (
 // guessing links which guesses were close.
 var ErrInvite = errors.New("this invitation is not valid: it may have been used, withdrawn, or have expired")
 
-// ErrOneOrganisation refuses an invitation into a second organisation
-// where the pack allows one only.
+// ErrOneOrganisation refuses an invitation into a second organisation: a
+// person belongs to one organisation at a time.
 var ErrOneOrganisation = errors.New("one organisation only")
 
 func memberID(tenant, sub, role string) string { return tenant + "|" + sub + "|" + role }
@@ -660,14 +660,15 @@ func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model
 				return err
 			}
 		}
-		if inv.Organisation != "" && r.pk.Organisations != nil && r.pk.Organisations.Single {
+		// A person belongs to one organisation, and acts for it.
+		if inv.Organisation != "" {
 			affs, err := r.affiliationsIn(tx, tenant, sub)
 			if err != nil {
 				return err
 			}
 			for _, a := range affs {
 				if a.Organisation != inv.Organisation {
-					return fmt.Errorf("%w: you already belong to organisation %s, and a person belongs to one organisation only here; leave it first", ErrOneOrganisation, a.Organisation)
+					return fmt.Errorf("%w: you already belong to organisation %s; leave it first", ErrOneOrganisation, a.Organisation)
 				}
 			}
 		}
