@@ -453,6 +453,8 @@ func classify(err error) (int, string) {
 	switch {
 	case errors.Is(err, register.ErrInvite):
 		return http.StatusGone, ""
+	case errors.Is(err, register.ErrOneOrganisation):
+		return http.StatusConflict, ""
 	case strings.Contains(text, "may not"), strings.Contains(text, "separation of duties"),
 		strings.Contains(text, "is not a proposing role"), strings.Contains(text, "only the proposer"),
 		strings.Contains(text, "only ") && strings.Contains(text, "can answer"):

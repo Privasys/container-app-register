@@ -5,6 +5,7 @@ package register_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"slices"
 	"strings"
@@ -234,5 +235,58 @@ func TestOrganisationAdministrators(t *testing.T) {
 	members, err := h.reg.OrganisationMembers(h.principal("sub-north-2", "police"), "ORG-NORTH")
 	if err != nil || len(members) != 2 || !slices.Contains(members[0].Roles, "police") {
 		t.Fatalf("members %+v %v", members, err)
+	}
+}
+
+func TestOneOrganisationOnlyWhenThePackSaysSo(t *testing.T) {
+	var doc map[string]any
+	if err := json.Unmarshal(carPackWithOrganisations(t), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["organisations"] = map[string]any{"class": "owner", "single": true}
+	single, _ := json.Marshal(doc)
+	h := newHarnessWith(t, t.TempDir(), single)
+	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
+	operator := h.principal("operator-1", "operator")
+
+	join(t, h, "operator-1", "sub-one", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
+
+	// An invitation into a second organisation can be issued, since the
+	// person it is for is not known until it is accepted, but not accepted.
+	h.tick()
+	inv, secret, err := h.reg.Invite(operator, register.InviteRequest{Role: "police", Organisation: "ORG-SOUTH"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.tick()
+	if _, _, err := h.reg.RedeemInvite("gov", "sub-one", inv.ID, secret); !errors.Is(err, register.ErrOneOrganisation) {
+		t.Fatalf("joined a second organisation: %v", err)
+	}
+	if affs, _ := h.reg.Affiliations("gov", "sub-one"); len(affs) != 1 || affs[0].Organisation != "ORG-NORTH" {
+		t.Fatalf("affiliations %+v", affs)
+	}
+
+	// The refused invitation is still open: someone else may accept it,
+	// and so may the same person once they have left their organisation.
+	h.tick()
+	if _, err := h.reg.RemoveFromOrganisation(operator, "ORG-NORTH", "sub-one", "Moved to the south."); err != nil {
+		t.Fatal(err)
+	}
+	h.tick()
+	if _, _, err := h.reg.RedeemInvite("gov", "sub-one", inv.ID, secret); err != nil {
+		t.Fatalf("after leaving: %v", err)
+	}
+	if affs, _ := h.reg.Affiliations("gov", "sub-one"); len(affs) != 1 || affs[0].Organisation != "ORG-SOUTH" {
+		t.Fatalf("affiliations after moving %+v", affs)
+	}
+}
+
+func TestSeveralOrganisationsByDefault(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithOrganisations(t))
+	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
+	join(t, h, "operator-1", "sub-two", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
+	join(t, h, "operator-1", "sub-two", register.InviteRequest{Organisation: "ORG-SOUTH"})
+	if affs, _ := h.reg.Affiliations("gov", "sub-two"); len(affs) != 2 {
+		t.Fatalf("affiliations %+v", affs)
 	}
 }

@@ -14,6 +14,10 @@ import (
 // and scopes read them.
 type Organisations struct {
 	Class string `json:"class"`
+	// Single limits a person to one organisation: an invitation into a
+	// second one is refused when it is accepted. A register whose rules for
+	// people in several organisations are not settled yet starts here.
+	Single bool `json:"single,omitempty"`
 }
 
 // Scope limits what a role sees and does in one class to the records of
