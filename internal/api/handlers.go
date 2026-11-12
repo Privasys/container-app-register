@@ -76,7 +76,9 @@ func (s *Server) appConfig(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Privasys-Transport") == "direct" {
 		doc["direct"] = true
 	}
-	if s.ClientID != "" {
+	if id := s.SignInClient.Load(); id != nil && *id != "" {
+		doc["clientId"] = *id
+	} else if s.ClientID != "" {
 		doc["clientId"] = s.ClientID
 	}
 	if s.AppID != "" {
@@ -169,7 +171,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 // sender and the external sources. What it reports names their state and
 // never a secret.
 func (s *Server) configureMail(body []byte, out map[string]any) error {
-	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources} {
+	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources, "sign_in": s.ConfigureSignIn} {
 		if apply == nil {
 			continue
 		}

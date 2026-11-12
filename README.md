@@ -183,7 +183,7 @@ to sign in, so the console offers stand-in personas instead.
 | `REGISTER_DATA_DIR` | The sealed volume. Default `/data`. The store marks the directory with its table layout (`layout` file, currently `2`); a directory written by another layout is refused at startup with a message saying so, because the SQL layer cannot alter columns in place. Start such a register on a fresh directory or restore from an export. |
 | `REGISTER_WEB_DIR` | Where the built console lives. Default `/web`, which is where the image puts it. |
 | `REGISTER_SITE_DIR` | An adopter site to serve in front of the register (see [Adopter site](#adopter-site)). Default `/site` when that directory exists; otherwise none. |
-| `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. |
+| `REGISTER_CLIENT_ID` | The identity-provider client the console signs people in as. Default `register`. A configure call with `client_id` replaces it and the register keeps that value across restarts, so one image serves every installation. |
 | `PRIVASYS_APP_ID` | Set by the platform runtime: the app's identifier. The page asks the identity provider for a token whose audience is this app (`app:<id>`), which is what the runtime accepts on a direct name. |
 | `REGISTER_SIGNIN_PROVIDERS` | On a direct adopter name, which federated identities the sign-in gate offers, comma-separated and in order (`github`, `google`, `microsoft`, `linkedin`). Empty offers every provider the identity provider has. An adopter whose people all use one work identity sets the one, e.g. `microsoft`. |
 | `REGISTER_OIDC_ISSUER` | Identity provider for bearer tokens. Default `https://privasys.id`. |

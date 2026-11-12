@@ -190,3 +190,30 @@ func TestTheProfileAssertedAtSignInIsKeptForLaterRequests(t *testing.T) {
 		t.Fatalf("members = %d %v, want the recorded name on the bootstrap grant", status, members)
 	}
 }
+
+// A configure call that names the installation's client replaces the one
+// the image was built with.
+func TestConfiguredClientReachesThePage(t *testing.T) {
+	ts, srv, reg := newTestServer(t)
+	srv.Ready(reg, auth.DevVerifier{})
+	srv.ClientID = "built-in"
+	get := func() string {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/app-config.js", nil)
+		req.Host = "diom-dar-uat.privasys.org"
+		resp, err := ts.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return string(body)
+	}
+	if body := get(); !strings.Contains(body, `"clientId":"built-in"`) {
+		t.Fatalf("built-in client missing: %s", body)
+	}
+	id := "uat-client"
+	srv.SignInClient.Store(&id)
+	if body := get(); !strings.Contains(body, `"clientId":"uat-client"`) {
+		t.Fatalf("configured client missing: %s", body)
+	}
+}
