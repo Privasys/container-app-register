@@ -91,6 +91,7 @@ func run(log *slog.Logger) error {
 	server.Configure = app.configure
 	server.ConfigureMail = app.configureMail
 	server.ConfigureSources = app.configureSources
+	server.ConfigureSignIn = app.configureSignIn
 	if cfg.Mode != config.ModeStandby {
 		// Drafts sit on the sealed volume beside the store, outside the
 		// ledger; a standby keeps none, and a failover loses only drafts.

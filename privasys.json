@@ -64,6 +64,11 @@
                         "description": "The app registration's client secret. Kept on the sealed volume and sent only to Microsoft's token endpoint. Leave empty to keep the one held.",
                         "x-privasys": {"secret":true,"label":"Email: client secret"}
                     },
+                    "client_id": {
+                        "type": "string",
+                        "description": "The identity-provider client this installation signs people in as. Each installation registers its own; kept across restarts.",
+                        "x-privasys": {"label":"Sign-in: client identifier"}
+                    },
                     "mail_sender": {
                         "type": "string",
                         "description": "The address emails are sent from.",

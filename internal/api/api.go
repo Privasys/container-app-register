@@ -114,6 +114,13 @@ type Server struct {
 	// ClientID, when set, is the identity-provider client the console
 	// signs in as, in place of the one built into the page.
 	ClientID string
+	// SignInClient, once a configure call names one, replaces ClientID:
+	// each installation registers its own client, and one image serves
+	// them all.
+	SignInClient atomic.Pointer[string]
+	// ConfigureSignIn takes the configuration document and returns the
+	// sign-in client it set or kept, as ConfigureMail does for the sender.
+	ConfigureSignIn func(document []byte) (string, error)
 	// AppID, when set, is the platform's identifier of this app in hex;
 	// the page names it as the audience of the token it asks for.
 	AppID string
