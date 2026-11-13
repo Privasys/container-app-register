@@ -169,6 +169,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /configure", s.configure)
 
 	// The register proper.
+	// The public reader: no sign-in, public fields only (x-register.public).
+	mux.HandleFunc("GET /public/v1/{class}", s.wrapPublic(s.publicList))
+	mux.HandleFunc("GET /public/v1/{class}/{key}", s.wrapPublic(s.publicGet))
 	mux.HandleFunc("GET /api/v1/status", s.wrap(s.status))
 	mux.HandleFunc("GET /api/v1/pack", s.wrap(s.packDocument))
 	mux.HandleFunc("GET /api/v1/me", s.wrapCaller(s.me))
@@ -322,6 +325,27 @@ func (s *Server) wrap(h handler) http.HandlerFunc {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// wrapPublic serves the public reader: anyone, signed in or not, once the
+// register is up. The handler gets no principal; the register reads under
+// one it builds for the public, which sees the public fields only.
+func (s *Server) wrapPublic(h handler) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reg, _, ready := s.register()
+		if !ready {
+			writeError(w, http.StatusServiceUnavailable, "the register is not open yet", "")
+			return
+		}
+		result, err := h(&request{w: w, r: r, reg: reg})
+		if err != nil {
+			status, detail := classify(err)
+			writeError(w, status, err.Error(), detail)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-cache")
 		writeJSON(w, http.StatusOK, result)
 	}
 }

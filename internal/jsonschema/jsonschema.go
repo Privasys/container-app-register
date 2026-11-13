@@ -89,6 +89,10 @@ type FieldRules struct {
 	// enforce the referential rule the SQL layer has no foreign keys
 	// for.
 	Reference string `json:"reference,omitempty"`
+	// Public shows the field to anyone, without signing in, through the
+	// register's public reader. A class with no public field is not read
+	// there at all. Inside a group, each entry shows only its public members.
+	Public bool `json:"public,omitempty"`
 }
 
 var knownKeywords = map[string]bool{

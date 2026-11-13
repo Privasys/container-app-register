@@ -354,6 +354,9 @@ image's declaration covers only the console.
 | `GET /api/v1/records/{id}/history` | the timeline, with the transaction behind each version |
 | `POST /api/v1/workflows/{name}/propose` | start a workflow |
 | `POST /api/v1/tasks/{id}/decide` | approve or reject |
+| `POST /api/v1/tasks/{id}/return` | send back to the proposer for more information |
+| `GET /api/v1/documents/{digest}?task=` | a document, through the proposal that names it |
+| `GET /public/v1/{class}`, `GET /public/v1/{class}/{key}` | the public reader: no sign-in, only the fields a pack marks `x-register.public` |
 | `GET /api/v1/log` | the transaction log |
 | `GET /api/v1/proofs/natural-keys/{class}/{key}` | presence or absence, with proof |
 | `GET /api/v1/checkpoints` | the checkpoint chain |

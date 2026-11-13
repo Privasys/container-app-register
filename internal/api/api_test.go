@@ -27,9 +27,25 @@ const registrarToken = "dev:registrar-1:Registrar:register:registrar"
 
 func newTestServer(t *testing.T) (*httptest.Server, *Server, *register.Register) {
 	t.Helper()
+	return newTestServerWith(t, nil)
+}
+
+// newTestServerWith is newTestServer on the starter pack as edit leaves it.
+func newTestServerWith(t *testing.T, edit func(pack map[string]any)) (*httptest.Server, *Server, *register.Register) {
+	t.Helper()
 	doc, err := os.ReadFile("../../packs/car-register/pack.json")
 	if err != nil {
 		t.Fatalf("read pack: %v", err)
+	}
+	if edit != nil {
+		var m map[string]any
+		if err := json.Unmarshal(doc, &m); err != nil {
+			t.Fatal(err)
+		}
+		edit(m)
+		if doc, err = json.Marshal(m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	loaded, err := pack.Load(doc)
 	if err != nil {

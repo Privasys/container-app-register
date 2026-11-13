@@ -545,6 +545,19 @@ func (s *Server) packDocument(req *request) (any, error) {
 
 // -- records ---------------------------------------------------------------
 
+func (s *Server) publicList(req *request) (any, error) {
+	q := req.r.URL.Query()
+	records, err := req.reg.PublicList(req.r.PathValue("class"), q.Get("q"), matchParams(q), intParam(req.r, "limit", 50), intParam(req.r, "offset", 0))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"records": records, "count": len(records)}, nil
+}
+
+func (s *Server) publicGet(req *request) (any, error) {
+	return req.reg.PublicGet(req.r.PathValue("class"), req.r.PathValue("key"))
+}
+
 func (s *Server) listRecords(req *request) (any, error) {
 	q := req.r.URL.Query()
 	filter := register.ListFilter{
