@@ -29,6 +29,8 @@ type SourceRecord struct {
 	// what it holds is what the source says now.
 	Held    bool `json:"held"`
 	Current bool `json:"current"`
+	// Shown is what the source's show list hands over, never recorded.
+	Shown map[string]any `json:"shown,omitempty"`
 }
 
 // MapSource turns a fetched document into a record of the source's class.
@@ -133,6 +135,14 @@ func (r *Register) describeSource(tx *store.Tx, p *auth.Principal, tenant string
 		}
 		if !ok {
 			return fmt.Errorf("%s may not bring in this %s: it is not one of their organisation's", p.Acting, strings.ReplaceAll(class.Name, "_", " "))
+		}
+	}
+	for _, name := range src.Show {
+		if v, ok := doc[name]; ok {
+			if out.Shown == nil {
+				out.Shown = map[string]any{}
+			}
+			out.Shown[name] = v
 		}
 	}
 	row, err := tx.QueryOne("SELECT id, status FROM `objects` WHERE tenant = " + store.Lit(tenant) +

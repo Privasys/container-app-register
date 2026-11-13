@@ -132,3 +132,29 @@ func TestBringingInARecordFromASource(t *testing.T) {
 		t.Errorf("a citizen imported: %v", err)
 	}
 }
+
+// A source's show list hands members of the document to whoever may bring
+// the record in, without recording them in the record.
+func TestASourceShowsWhatItDoesNotRecord(t *testing.T) {
+	src := map[string]any{}
+	for k, v := range vehicleSource {
+		src[k] = v
+	}
+	src["show"] = []any{"keepers"}
+	h := newHarnessWith(t, t.TempDir(), carPackWith(t, src))
+	h.tick()
+	registrar := h.principal("registrar-1", "registrar")
+	doc := vehicleDoc()
+	doc["keepers"] = []any{map[string]any{"name": "A. Keeper"}}
+
+	seen, err := h.reg.DescribeSource(registrar, "vehicle_registry", "1HGCM82633A004352", doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keepers, _ := seen.Shown["keepers"].([]any); len(keepers) != 1 {
+		t.Fatalf("shown: %+v", seen.Shown)
+	}
+	if _, recorded := seen.Payload["keepers"]; recorded {
+		t.Error("a shown member was mapped into the record")
+	}
+}
