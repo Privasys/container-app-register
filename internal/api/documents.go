@@ -9,9 +9,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
+
+var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // MaxDocument bounds one uploaded document.
 const MaxDocument = 25 << 20
@@ -58,4 +63,61 @@ func (s *Server) uploadDocument(req *request) (any, error) {
 		}
 	}
 	return map[string]any{"digest": digest, "algorithm": "SHA-256", "size": n}, nil
+}
+
+// written says a handler has written its own response.
+type written struct{}
+
+// downloadDocument hands back a document the caller may read: one whose
+// digest a proposal they can see names in its evidence. The register keeps
+// no file name or type, so the type is detected and the name is the
+// evidence's own (dedication_instrument.pdf, for instance).
+func (s *Server) downloadDocument(req *request) (any, error) {
+	digest := req.r.PathValue("digest")
+	if !sha256Hex.MatchString(digest) {
+		return nil, errors.New("a document is named by its SHA-256 digest")
+	}
+	taskID := req.r.URL.Query().Get("task")
+	if taskID == "" {
+		return nil, errors.New("name the proposal the document belongs to")
+	}
+	task, err := req.reg.Task(req.p, taskID)
+	if err != nil {
+		return nil, err
+	}
+	name := ""
+	for key, v := range task.Evidence {
+		if d, _ := v.(string); d == digest {
+			name = key
+		}
+	}
+	if name == "" || s.Documents == "" {
+		return nil, fmt.Errorf("no document %s in proposal %s", digest, taskID)
+	}
+	f, err := os.Open(filepath.Join(s.Documents, digest))
+	if err != nil {
+		return nil, fmt.Errorf("no document %s in proposal %s", digest, taskID)
+	}
+	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	kind := http.DetectContentType(head[:n])
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	ext := ""
+	switch {
+	case strings.HasPrefix(kind, "application/pdf"):
+		ext = ".pdf"
+	case strings.HasPrefix(kind, "text/plain"):
+		ext = ".txt"
+	}
+	h := req.w.Header()
+	h.Set("Content-Type", kind)
+	h.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s%s"`, name, ext))
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cache-Control", "private, no-store")
+	req.w.WriteHeader(http.StatusOK)
+	_, _ = io.Copy(req.w, f)
+	return written{}, nil
 }
