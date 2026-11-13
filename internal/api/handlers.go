@@ -637,6 +637,16 @@ func (s *Server) decide(req *request) (any, error) {
 	return req.reg.Decide(req.p, req.r.PathValue("id"), body)
 }
 
+func (s *Server) returnTask(req *request) (any, error) {
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if err := decode(req.r, &body); err != nil {
+		return nil, err
+	}
+	return req.reg.Return(req.p, req.r.PathValue("id"), body.Reason)
+}
+
 func (s *Server) withdraw(req *request) (any, error) {
 	var body struct {
 		Reason string `json:"reason,omitempty"`

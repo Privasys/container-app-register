@@ -41,6 +41,7 @@ const (
 	KindTaskApprove        = "workflow.approve"
 	KindTaskReject         = "workflow.reject"
 	KindTaskWithdraw       = "workflow.withdraw"
+	KindTaskReturn         = "workflow.return"
 	KindRetentionPrune     = "retention.prune"
 	KindErasure            = "erasure.execute"
 	KindProfileRecord      = "profile.record"
@@ -313,6 +314,10 @@ const (
 	TaskApproved             = "approved"
 	TaskRejected             = "rejected"
 	TaskWithdrawn            = "withdrawn"
+	// TaskReturned is a proposal the reviewer sent back for more
+	// information: closed without a decision on its merits. The proposer
+	// answers by proposing again.
+	TaskReturned = "returned"
 )
 
 // Checkpoint is the signed statement that the register was in a given
