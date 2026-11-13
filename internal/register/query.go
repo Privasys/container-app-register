@@ -29,10 +29,14 @@ type ListFilter struct {
 	Match map[string]string
 	// Search is a prefix match over the class's natural key.
 	Search string
-	Order  string
-	Desc   bool
-	Limit  int
-	Offset int
+	// Text, with TextColumns, matches a record whose natural key starts
+	// with it or whose named projected columns contain it.
+	Text        string
+	TextColumns []string
+	Order       string
+	Desc        bool
+	Limit       int
+	Offset      int
 }
 
 // ObjectSummary is a record's head, without its payload.
@@ -70,6 +74,17 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 	}
 	if f.Search != "" {
 		clauses = append(clauses, "o.natural_key LIKE "+store.Lit(escapeLike(f.Search)+"%"))
+	}
+	if text := strings.TrimSpace(f.Text); text != "" {
+		like := escapeLike(text)
+		ors := []string{"o.natural_key LIKE " + store.Lit(like+"%")}
+		for _, col := range f.TextColumns {
+			if !projections[col] {
+				return nil, fmt.Errorf("%s is not a queryable property of %s", col, class.Name)
+			}
+			ors = append(ors, "q."+store.Ident(col)+" LIKE "+store.Lit("%"+like+"%"))
+		}
+		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
 	}
 	for _, col := range sortedKeys(f.Match) {
 		if !projections[col] {
