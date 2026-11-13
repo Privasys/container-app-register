@@ -338,14 +338,21 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 			if org == nil {
 				return fmt.Errorf("%s may not manage members", p.Acting)
 			}
+			through, err := r.invitesThrough(tx, p, req.Role, org.key)
+			if err != nil {
+				return err
+			}
 			admin, err := r.isOrganisationAdmin(tx, p.Tenant, p.Sub, org.key)
 			if err != nil {
 				return err
 			}
-			if !admin {
+			if through {
+				// The pack lets this role invite to this role, into the
+				// organisation of a record it is scoped to.
+			} else if !admin {
 				return fmt.Errorf("%s may not invite into organisation %s", p.Acting, org.key)
 			}
-			if req.Role != "" {
+			if req.Role != "" && !through {
 				held, err := r.organisationRolesIn(tx, p.Tenant, org.key)
 				if err != nil {
 					return err
@@ -369,6 +376,24 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 		return err
 	})
 	return inv, secret, err
+}
+
+// invitesThrough says whether a pack's invitation rule lets the caller
+// invite to role into the organisation keyed key: the rule names the
+// caller's acting role and the role, and the record of the rule's class
+// with that natural key is within the caller's scope.
+func (r *Register) invitesThrough(tx *store.Tx, p *auth.Principal, role, key string) (bool, error) {
+	rule := r.pk.InvitationRule(p.Acting, role)
+	if rule == nil {
+		return false, nil
+	}
+	class := r.pk.Class(rule.Class)
+	row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +
+		" AND class = " + store.Lit(class.Name) + " AND natural_key = " + store.Lit(key))
+	if err != nil || row == nil {
+		return false, err
+	}
+	return r.checkScope(tx, p, class, row.Str("id")) == nil, nil
 }
 
 func (r *Register) CreateInvite(p *auth.Principal, role, label string, validFor time.Duration) (*Invite, string, error) {

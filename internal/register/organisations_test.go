@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Privasys/container-app-register/internal/pack"
 	"github.com/Privasys/container-app-register/internal/register"
 )
 
@@ -272,5 +273,40 @@ func TestAPersonBelongsToOneOrganisation(t *testing.T) {
 	}
 	if affs, _ := h.reg.Affiliations("gov", "sub-one"); len(affs) != 1 || affs[0].Organisation != "ORG-SOUTH" {
 		t.Fatalf("affiliations after moving %+v", affs)
+	}
+}
+
+// A pack's invitation rule lets a role invite people, to a role, into the
+// organisation of a record within its scope, without administering it; a
+// record outside its scope, or a role the rule does not name, stays refused.
+func TestAnInvitationRuleReachesOnlyRecordsInScope(t *testing.T) {
+	doc := carPackWithOrganisations(t)
+	var m map[string]any
+	if err := json.Unmarshal(doc, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["invitations"] = []any{map[string]any{"inviter": "police", "role": "insurer", "class": "owner"}}
+	doc, _ = json.Marshal(m)
+	h := newHarnessWith(t, t.TempDir(), doc)
+	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
+	join(t, h, "operator-1", "sub-north-1", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
+	join(t, h, "sub-north-1", "sub-north-2", register.InviteRequest{Organisation: "ORG-NORTH"})
+
+	colleague := h.principal("sub-north-2", "police") // not an administrator
+	h.tick()
+	if _, _, err := h.reg.Invite(colleague, register.InviteRequest{Role: "insurer", Organisation: "ORG-NORTH"}); err != nil {
+		t.Fatalf("the rule did not let a police officer invite an insurer into its own organisation: %v", err)
+	}
+	if _, _, err := h.reg.Invite(colleague, register.InviteRequest{Role: "insurer", Organisation: "ORG-SOUTH"}); err == nil {
+		t.Fatal("an invitation reached an organisation outside the inviter's scope")
+	}
+	if _, _, err := h.reg.Invite(colleague, register.InviteRequest{Role: "registrar", Organisation: "ORG-NORTH"}); err == nil {
+		t.Fatal("an invitation to a role the rule does not name was issued")
+	}
+
+	m["invitations"] = []any{map[string]any{"inviter": "police", "role": "nobody", "class": "owner"}}
+	bad, _ := json.Marshal(m)
+	if _, err := pack.Load(bad); err == nil {
+		t.Fatal("a rule naming an unknown role was accepted")
 	}
 }

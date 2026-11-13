@@ -84,6 +84,7 @@ cadence is a poor fit for that promise.
 | `column` | Override the projected column name. The names `object_id`, `tenant`, `status` and `updated_at` belong to every query table and are refused. |
 | `member` | Project one scalar member of an object-valued property instead of the object. A record that wraps every value in an envelope `{"value": …, "status": …}` sets `"member": "value"`; the column takes the member's type, and an envelope that is absent or lacks the member projects the column's zero value. The property must be an object that declares the member, and the member must be a scalar. |
 | `reference` | The class this property points at. The core enforces the referential rule the SQL layer has no foreign keys for, including against records created earlier in the same write set. |
+| `public` | Shown to anyone, without signing in, by the public reader (`GET /public/v1/{class}` and `/public/v1/{class}/{key}`). A class with no public property is not read there. An envelope shows its value and status only; inside a group, an entry shows its public members. A search matches the start of the natural key and any public text column, ignoring case. |
 
 Two combinations the loader refuses: a property that is both `pii` and
 `queryable`, because a query projection is plaintext and everything in
@@ -186,6 +187,21 @@ it sees those fields named in `redacted` rather than silently dropped.
 incompatible roles is refused outright rather than acting under the
 more powerful of the two: a breach the system does not notice is not a
 control.
+
+### Invitation rules
+
+An organisation's administrator invites colleagues into it. A pack can let
+another role invite people into an organisation it does not administer:
+
+```json
+"invitations": [{ "inviter": "registered_agent", "role": "council_member", "class": "foundation" }]
+```
+
+A holder of `inviter` may then invite someone to `role` into the
+organisation whose key is the natural key of a record of `class` within
+the inviter's scope: here, a registered agent invites the council members
+of a foundation it acts for. Outside its scope, or to another role, the
+invitation is refused.
 
 ## Saved queries
 
