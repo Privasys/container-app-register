@@ -5,7 +5,7 @@ package register
 
 import (
 	"fmt"
-	"strings"
+	"sort"
 
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/jsonschema"
@@ -73,11 +73,16 @@ func (r *Register) PublicList(class, search string, match map[string]string, lim
 		return nil, err
 	}
 	public := map[string]bool{}
+	var text []string
 	for _, proj := range c.Compiled().Projections() {
 		if s := c.Compiled().Properties[proj.Property]; s != nil && s.Register != nil && s.Register.Public {
 			public[proj.Column] = true
+			if proj.Type == "string" {
+				text = append(text, proj.Column)
+			}
 		}
 	}
+	sort.Strings(text)
 	for col := range match {
 		if !public[col] {
 			return nil, fmt.Errorf("%s is not a public field of %s", col, class)
@@ -87,7 +92,7 @@ func (r *Register) PublicList(class, search string, match map[string]string, lim
 		limit = 50
 	}
 	rows, err := r.ListObjects(r.publicPrincipal(class), ListFilter{
-		Class: class, Search: strings.TrimSpace(search), Match: match, Limit: limit, Offset: offset,
+		Class: class, Text: search, TextColumns: text, Match: match, Limit: limit, Offset: offset,
 		Order: "updated_at", Desc: true,
 	})
 	if err != nil {

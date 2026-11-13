@@ -63,6 +63,15 @@ func TestPublicReader(t *testing.T) {
 		t.Errorf("listed fields: %v", fields)
 	}
 
+	// Text search: a part of a public field, whatever its case of use.
+	status, body = get(t, ts, "/public/v1/vehicle?q=eugeo", "")
+	if records, _ := body["records"].([]any); status != http.StatusOK || len(records) != 1 {
+		t.Fatalf("search by part of the make = %d (%v)", status, body)
+	}
+	if _, body = get(t, ts, "/public/v1/vehicle?q=red", ""); len(body["records"].([]any)) != 0 {
+		t.Error("a search matched a field that is not public")
+	}
+
 	status, body = get(t, ts, "/public/v1/vehicle/VF3CCHMZ3PT000096", "")
 	if status != http.StatusOK {
 		t.Fatalf("public record = %d (%v)", status, body)
