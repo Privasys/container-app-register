@@ -198,6 +198,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/records/{id}/versions/{version}", s.wrap(s.getRecordVersion))
 
 	mux.HandleFunc("POST /api/v1/documents", s.wrap(s.uploadDocument))
+	mux.HandleFunc("GET /api/v1/documents/{digest}", s.wrap(s.downloadDocument))
 	mux.HandleFunc("GET /api/v1/drafts", s.wrap(s.listDrafts))
 	mux.HandleFunc("POST /api/v1/drafts", s.wrap(s.createDraft))
 	mux.HandleFunc("GET /api/v1/drafts/{id}", s.wrap(s.getDraft))
@@ -311,6 +312,9 @@ func (s *Server) wrap(h handler) http.HandlerFunc {
 		if err != nil {
 			status, detail := classify(err)
 			writeError(w, status, err.Error(), detail)
+			return
+		}
+		if _, ok := result.(written); ok {
 			return
 		}
 		if result == nil {
