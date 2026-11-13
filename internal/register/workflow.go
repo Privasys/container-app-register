@@ -94,6 +94,13 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 		if req.ObjectID != "" {
 			return nil, fmt.Errorf("%s creates a record and takes no object", workflowName)
 		}
+		// The register assigns its identifiers; nobody names one in a
+		// proposal, so none can be chosen, guessed or reused.
+		for _, id := range class.Identifiers {
+			if v, ok := req.Payload[id.Property]; ok && v != nil && v != "" {
+				return nil, fmt.Errorf("the register assigns %s; a proposal does not name one", id.Property)
+			}
+		}
 		if err := class.Compiled().Validate(withPlaceholders(class, req.Payload)); err != nil {
 			return nil, fmt.Errorf("proposed record does not match the %s schema: %w", class.Name, err)
 		}

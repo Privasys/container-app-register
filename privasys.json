@@ -15,7 +15,8 @@
             "/brand/",
             "/favicon.svg",
             "/openapi.yaml",
-            "/public/"
+            "/public/",
+            "/id/"
         ],
         "direct": "private"
     },
