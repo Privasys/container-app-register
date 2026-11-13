@@ -76,13 +76,14 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 		clauses = append(clauses, "o.natural_key LIKE "+store.Lit(escapeLike(f.Search)+"%"))
 	}
 	if text := strings.TrimSpace(f.Text); text != "" {
-		like := escapeLike(text)
-		ors := []string{"o.natural_key LIKE " + store.Lit(like+"%")}
+		// Case does not matter: people type names as they remember them.
+		like := escapeLike(strings.ToLower(text))
+		ors := []string{"LOWER(o.natural_key) LIKE " + store.Lit(like+"%")}
 		for _, col := range f.TextColumns {
 			if !projections[col] {
 				return nil, fmt.Errorf("%s is not a queryable property of %s", col, class.Name)
 			}
-			ors = append(ors, "q."+store.Ident(col)+" LIKE "+store.Lit("%"+like+"%"))
+			ors = append(ors, "LOWER(q."+store.Ident(col)+") LIKE "+store.Lit("%"+like+"%"))
 		}
 		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
 	}
