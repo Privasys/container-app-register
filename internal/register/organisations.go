@@ -280,10 +280,20 @@ func unwrap(v any) any {
 // inScope says whether a record with this payload is within what the
 // caller's acting role may see and do in its class.
 func (r *Register) inScope(tx *store.Tx, p *auth.Principal, class *pack.Class, payload map[string]any) (bool, error) {
-	scope := r.pk.ScopeFor(class.Name, p.Acting)
-	if scope == nil {
+	scopes := r.pk.ScopesFor(class.Name, p.Acting)
+	if len(scopes) == 0 {
 		return true, nil
 	}
+	for _, scope := range scopes {
+		ok, err := r.inOneScope(tx, p, scope, payload)
+		if ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+func (r *Register) inOneScope(tx *store.Tx, p *auth.Principal, scope *pack.Scope, payload map[string]any) (bool, error) {
 	value := fmt.Sprint(unwrap(payload[scope.Property]))
 	if scope.Via == "" {
 		orgs, err := r.organisationsOf(tx, p)
@@ -304,7 +314,7 @@ func (r *Register) inScope(tx *store.Tx, p *auth.Principal, class *pack.Class, p
 
 // checkScope refuses a record outside the caller's scope.
 func (r *Register) checkScope(tx *store.Tx, p *auth.Principal, class *pack.Class, objectID string) error {
-	if r.pk.ScopeFor(class.Name, p.Acting) == nil {
+	if len(r.pk.ScopesFor(class.Name, p.Acting)) == 0 {
 		return nil
 	}
 	head, err := r.headVersion(tx, class, objectID)
@@ -324,10 +334,25 @@ func (r *Register) checkScope(tx *store.Tx, p *auth.Principal, class *pack.Class
 // scopeClause is the SQL condition that keeps a listing to the caller's
 // scope, empty when the caller's role is not limited in the class.
 func (r *Register) scopeClause(tx *store.Tx, p *auth.Principal, class *pack.Class) (string, error) {
-	scope := r.pk.ScopeFor(class.Name, p.Acting)
-	if scope == nil {
+	scopes := r.pk.ScopesFor(class.Name, p.Acting)
+	if len(scopes) == 0 {
 		return "", nil
 	}
+	var ors []string
+	for _, scope := range scopes {
+		clause, err := r.oneScopeClause(tx, p, class, scope)
+		if err != nil {
+			return "", err
+		}
+		ors = append(ors, clause)
+	}
+	if len(ors) == 1 {
+		return ors[0], nil
+	}
+	return "(" + strings.Join(ors, " OR ") + ")", nil
+}
+
+func (r *Register) oneScopeClause(tx *store.Tx, p *auth.Principal, class *pack.Class, scope *pack.Scope) (string, error) {
 	var allowed []string
 	if scope.Via == "" {
 		orgs, err := r.organisationsOf(tx, p)

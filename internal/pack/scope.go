@@ -18,7 +18,8 @@ type Organisations struct {
 }
 
 // Scope limits what a role sees and does in one class to the records of
-// the organisations the person belongs to. Roles a scope does not name are
+// the organisations the person belongs to. A role may have several scopes
+// in a class; a record any of them admits is in scope. Roles a scope does not name are
 // not limited by it; a role a scope names sees only what the scope admits,
 // and nothing when the person belongs to no organisation.
 //
@@ -89,12 +90,16 @@ func (p *Pack) validateScopes() error {
 	return nil
 }
 
-// ScopeFor returns the scope that limits a role in a class, or nil.
-func (p *Pack) ScopeFor(class, role string) *Scope {
+// ScopesFor returns the scopes that limit a role in a class, none when it
+// is not limited. With several, a record is in scope under any of them: an
+// agent sees its own firm's organisation and those of the foundations it
+// acts for.
+func (p *Pack) ScopesFor(class, role string) []*Scope {
+	var out []*Scope
 	for _, s := range p.Scopes {
 		if s.Class == class && contains(s.Roles, role) {
-			return s
+			out = append(out, s)
 		}
 	}
-	return nil
+	return out
 }
