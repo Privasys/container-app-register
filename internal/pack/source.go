@@ -36,6 +36,11 @@ type Source struct {
 	Envelope map[string]any `json:"envelope,omitempty"`
 	// Status decides the record's lifecycle status from the document.
 	Status *StatusMap `json:"status,omitempty"`
+	// Show names members of the document that a lookup hands to the person
+	// who asked, as the source gave them, without recording them: what they
+	// need to act on, such as the people to invite, which the record does
+	// not keep. Only someone who may bring the record in sees them.
+	Show []string `json:"show,omitempty"`
 }
 
 // FieldMap says where one property comes from: a path into the document,
