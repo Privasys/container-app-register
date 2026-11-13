@@ -310,3 +310,50 @@ func TestAnInvitationRuleReachesOnlyRecordsInScope(t *testing.T) {
 		t.Fatal("a rule naming an unknown role was accepted")
 	}
 }
+
+// A role may have several scopes in a class: a record any of them admits is
+// in scope, in a listing and in a single read alike.
+func TestARecordInAnyOfSeveralScopesIsInScope(t *testing.T) {
+	doc := carPackWithOrganisations(t)
+	var m map[string]any
+	if err := json.Unmarshal(doc, &m); err != nil {
+		t.Fatal(err)
+	}
+	m["scopes"] = []any{
+		map[string]any{"class": "owner", "roles": []any{"police"}, "property": "reference"},
+		map[string]any{"class": "owner", "roles": []any{"police"}, "property": "country"},
+	}
+	// The second scope reads an organisation's key from country: long
+	// enough to hold one in this test pack.
+	for _, c := range m["classes"].([]any) {
+		if class := c.(map[string]any); class["name"] == "owner" {
+			country := class["schema"].(map[string]any)["properties"].(map[string]any)["country"].(map[string]any)
+			delete(country, "maxLength")
+		}
+	}
+	doc, _ = json.Marshal(m)
+	h := newHarnessWith(t, t.TempDir(), doc)
+	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
+	operator := h.principal("operator-1", "operator")
+	h.tick()
+	if _, _, err := h.reg.RecordOrganisation(operator, map[string]any{
+		"reference": "ORG-EXTRA", "kind": "company", "country": "ORG-NORTH", "name": "Organisation ORG-EXTRA",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	join(t, h, "operator-1", "sub-north-1", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
+
+	police := h.principal("sub-north-1", "police")
+	rows, err := h.reg.ListObjects(police, register.ListFilter{Class: "owner", Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	for _, r := range rows {
+		keys = append(keys, r.NaturalKey)
+	}
+	slices.Sort(keys)
+	if !slices.Equal(keys, []string{"ORG-EXTRA", "ORG-NORTH"}) {
+		t.Fatalf("in scope: %v", keys)
+	}
+}
