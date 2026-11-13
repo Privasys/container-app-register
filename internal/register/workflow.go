@@ -352,6 +352,70 @@ func (r *Register) Decide(p *auth.Principal, taskID string, d Decision) (*Outcom
 	return out, nil
 }
 
+// Return sends a proposal back to its proposer for more information, as a
+// reviewer who may decide it: the proposal closes without a decision on its
+// merits, the request is recorded with it, and the proposer answers by
+// proposing again. It is a reviewer's act, under the same rules as a decision.
+func (r *Register) Return(p *auth.Principal, taskID, reason string) (*Outcome, error) {
+	if strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("say what information is needed")
+	}
+	var out *Outcome
+	err := r.st.Do(func(tx *store.Tx) error {
+		task, err := r.taskByID(tx, taskID)
+		if err != nil {
+			return err
+		}
+		wf := r.pk.Workflow(task.Workflow)
+		if wf == nil {
+			return fmt.Errorf("this register no longer declares workflow %q", task.Workflow)
+		}
+		if !p.CanOn(auth.PermApprove, wf.Name) || !containsString(wf.ApproveRoles, p.Acting) {
+			return fmt.Errorf("%s may not decide %s", p.Acting, wf.Name)
+		}
+		if wf.Independence && task.ProposerSub == p.Sub {
+			return fmt.Errorf("separation of duties: %s proposed this and may not also decide it", p.Sub)
+		}
+		if task.State != model.TaskAwaitingReview {
+			return fmt.Errorf("this proposal is %s and is not awaiting a decision", task.State)
+		}
+		at := r.now()
+		ops := []model.WriteOp{{
+			Table: "tasks",
+			Key:   map[string]any{"id": task.ID},
+			Values: map[string]any{
+				"state": model.TaskReturned, "updated_at": at,
+				"decided_by": p.Sub, "decided_at": at, "decision_reason": clip(reason, 255),
+			},
+		}}
+		closed, err := r.closeProposal(tx, task.Tenant, task.ID, at)
+		if err != nil {
+			return err
+		}
+		ops = append(ops, closed...)
+		env := model.Envelope{
+			Kind: model.KindTaskReturn, Tenant: task.Tenant, Class: task.Class,
+			Author: principalAuthor(p), Timestamp: at,
+			Message: composeMessage("Ask for more information: "+displayName(wf), reason),
+			Refs:    []model.Ref{{Type: model.RefRelates, Target: task.ID}},
+		}
+		txn, err := r.commit(tx, env, ops)
+		if err != nil {
+			return err
+		}
+		updated, err := r.taskByID(tx, task.ID)
+		if err != nil {
+			return err
+		}
+		out = &Outcome{Task: updated, Transaction: txn, ObjectID: task.ObjectID}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Withdraw lets a proposer take back their own proposal.
 func (r *Register) Withdraw(p *auth.Principal, taskID, reason string) (*Outcome, error) {
 	var out *Outcome

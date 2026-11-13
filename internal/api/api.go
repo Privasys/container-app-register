@@ -212,6 +212,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/tasks/{id}/accept", s.wrap(s.accept))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/decide", s.wrap(s.decide))
 	mux.HandleFunc("POST /api/v1/tasks/{id}/withdraw", s.wrap(s.withdraw))
+	mux.HandleFunc("POST /api/v1/tasks/{id}/return", s.wrap(s.returnTask))
 
 	mux.HandleFunc("GET /api/v1/log", s.wrap(s.log_))
 	mux.HandleFunc("GET /api/v1/log/{txid}", s.wrap(s.transaction))
