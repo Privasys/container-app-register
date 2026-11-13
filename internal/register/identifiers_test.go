@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"os"
 	"regexp"
+	"strings"
 	"testing"
 
+	"github.com/Privasys/container-app-register/internal/pack"
 	"github.com/Privasys/container-app-register/internal/register"
 )
 
@@ -92,5 +94,41 @@ func TestTheSerialPermutationNeverRepeats(t *testing.T) {
 			t.Fatalf("counter %d gave %d, out of range or repeated", counter, v)
 		}
 		seen[v] = true
+	}
+}
+
+// Nobody names an identifier the register assigns: a proposal that carries
+// one is refused, whatever the value.
+func TestAProposalMayNotNameAnAssignedIdentifier(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithOwnerIdentifier(t))
+	clerk := h.principal("clerk-1", "clerk")
+	h.tick()
+	_, err := h.reg.Propose(clerk, "register_owner", register.ProposeRequest{Payload: map[string]any{
+		"reference": "OWN-2026-000000-00", "kind": "company", "country": "IM", "name": "Chosen",
+	}})
+	if err == nil || !strings.Contains(err.Error(), "the register assigns reference") {
+		t.Fatalf("a proposal named its own identifier: %v", err)
+	}
+}
+
+// An identifier is read as typed, in any case, with or without hyphens,
+// and refused when it is malformed or its check digits are wrong.
+func TestAnIdentifierIsReadAsTyped(t *testing.T) {
+	id := &pack.Identifier{Property: "dai", Format: "IM-DAR-{year}-{serial:6}-{check}"}
+	good := "IM-DAR-2027-7K3QX9-" + register.Check97("IMDAR20277K3QX9")
+	for _, typed := range []string{good, strings.ToLower(good), strings.ReplaceAll(good, "-", ""), " " + good + " "} {
+		got, err := register.Canonical(id, typed)
+		if err != nil || got != good {
+			t.Errorf("%q read as %q (%v)", typed, got, err)
+		}
+	}
+	bad := good[:len(good)-2] + "00"
+	if good[len(good)-2:] == "00" {
+		bad = good[:len(good)-2] + "01"
+	}
+	for _, typed := range []string{bad, "IM-DAR-2027-7K3QXI-63", "IM-DAR-27-7K3QX9-63", good + "1", "XX-DAR-2027-7K3QX9-63"} {
+		if got, err := register.Canonical(id, typed); err == nil {
+			t.Errorf("%q accepted as %q", typed, got)
+		}
 	}
 }

@@ -170,6 +170,8 @@ func (s *Server) Handler() http.Handler {
 
 	// The register proper.
 	// The public reader: no sign-in, public fields only (x-register.public).
+	// An identifier the register assigns resolves to its record's page.
+	mux.HandleFunc("GET /id/{property}/{value}", s.resolveIdentifier)
 	mux.HandleFunc("GET /public/v1/{class}", s.wrapPublic(s.publicList))
 	mux.HandleFunc("GET /public/v1/{class}/{key}", s.wrapPublic(s.publicGet))
 	mux.HandleFunc("GET /api/v1/status", s.wrap(s.status))

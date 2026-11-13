@@ -185,3 +185,84 @@ func withPlaceholders(class *pack.Class, payload map[string]any) map[string]any 
 func Permute(key []byte, scope string, counter uint64, bits int) uint64 {
 	return permute(key, scope, counter, bits)
 }
+
+// Canonical reads an identifier as someone may type it, in any case and
+// with or without its hyphens, and returns it as the format writes it. It
+// refuses characters outside the format's alphabet, a wrong length and
+// wrong check digits; it never substitutes a character.
+func Canonical(id *pack.Identifier, input string) (string, error) {
+	var compact strings.Builder
+	for _, r := range strings.ToUpper(strings.TrimSpace(input)) {
+		switch {
+		case r == '-' || r == ' ':
+		case (r >= '0' && r <= '9') || (r >= 'A' && r <= 'Z'):
+			compact.WriteRune(r)
+		default:
+			return "", fmt.Errorf("%q is not a character of a %s", r, id.Property)
+		}
+	}
+	rest := compact.String()
+	var out strings.Builder
+	take := func(n int) (string, bool) {
+		if len(rest) < n {
+			return "", false
+		}
+		s := rest[:n]
+		rest = rest[n:]
+		return s, true
+	}
+	for _, part := range id.Parts() {
+		switch {
+		case part == "{year}":
+			y, ok := take(4)
+			if !ok || strings.Trim(y, "0123456789") != "" {
+				return "", fmt.Errorf("not a well-formed %s", id.Property)
+			}
+			out.WriteString(y)
+		case strings.HasPrefix(part, "{serial:"):
+			s, ok := take(id.SerialLength())
+			if !ok {
+				return "", fmt.Errorf("not a well-formed %s", id.Property)
+			}
+			for _, r := range s {
+				if !strings.ContainsRune(crockford, r) {
+					return "", fmt.Errorf("%q is not a character of a %s", r, id.Property)
+				}
+			}
+			out.WriteString(s)
+		case part == "{check}":
+			c, ok := take(2)
+			if !ok || strings.Trim(c, "0123456789") != "" {
+				return "", fmt.Errorf("not a well-formed %s", id.Property)
+			}
+			out.WriteString(c)
+		default:
+			lit := strings.ToUpper(strings.ReplaceAll(part, "-", ""))
+			got, ok := take(len(lit))
+			if !ok || got != lit {
+				return "", fmt.Errorf("not a well-formed %s", id.Property)
+			}
+			out.WriteString(part)
+		}
+	}
+	if rest != "" {
+		return "", fmt.Errorf("not a well-formed %s", id.Property)
+	}
+	if !Valid97(out.String()) {
+		return "", fmt.Errorf("the check digits of this %s are wrong", id.Property)
+	}
+	return out.String(), nil
+}
+
+// IdentifierClass returns the class and identifier a property names, if a
+// class assigns it.
+func (r *Register) IdentifierClass(property string) (*pack.Class, *pack.Identifier) {
+	for _, c := range r.pk.Classes {
+		for i := range c.Identifiers {
+			if c.Identifiers[i].Property == property {
+				return c, &c.Identifiers[i]
+			}
+		}
+	}
+	return nil, nil
+}

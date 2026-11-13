@@ -40,6 +40,9 @@ type Site struct {
 	// invitation: links become "<join>/<id>#<secret>" instead of the
 	// console's "/#/join/<id>/<secret>".
 	Join string `json:"join,omitempty"`
+	// Records names the page that shows one record of a class, with
+	// {key} for its natural key: where an identifier resolves to.
+	Records map[string]string `json:"records,omitempty"`
 
 	dir   string
 	pages map[string]*template.Template // by page path
