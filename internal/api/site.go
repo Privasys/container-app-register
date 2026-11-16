@@ -65,6 +65,26 @@ type SiteShell struct {
 type SiteStatic struct {
 	Prefix string `json:"prefix"`
 	Dir    string `json:"dir"`
+	// Immutable names the subdirectories whose files never change under
+	// one name (hashed build output, a vendored design system), served
+	// to be cached for a year. Unset, it is defaultImmutable.
+	Immutable []string `json:"immutable,omitempty"`
+}
+
+// defaultImmutable is where a shell's bundler writes its hashed output.
+var defaultImmutable = []string{"app/assets/"}
+
+func (st SiteStatic) immutable(rel string) bool {
+	dirs := st.Immutable
+	if dirs == nil {
+		dirs = defaultImmutable
+	}
+	for _, d := range dirs {
+		if strings.HasPrefix(rel, d) {
+			return true
+		}
+	}
+	return false
 }
 
 // siteData is what a page template receives.
@@ -205,6 +225,11 @@ func (site *Site) validate() error {
 		fi, err := os.Stat(filepath.Join(site.dir, filepath.FromSlash(st.Dir)))
 		if err != nil || !fi.IsDir() {
 			return fmt.Errorf("site: static dir %q is not a directory under %s", st.Dir, site.dir)
+		}
+		for _, d := range st.Immutable {
+			if d == "" || strings.HasPrefix(d, "/") || !strings.HasSuffix(d, "/") || strings.Contains("/"+d, "/.") {
+				return fmt.Errorf("site: immutable directory %q must be relative, end with / and hold no dot segment", d)
+			}
 		}
 	}
 	return nil
@@ -364,9 +389,7 @@ func (s *Server) siteStatic(st SiteStatic) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, "no such endpoint", r.URL.Path)
 			return
 		}
-		if strings.HasPrefix(rel, "app/assets/") || strings.HasPrefix(rel, "govuk/") {
-			// Hashed build output and the vendored design system never
-			// change under one name.
+		if st.immutable(rel) {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-cache")

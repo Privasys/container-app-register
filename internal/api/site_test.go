@@ -28,7 +28,7 @@ func writeSite(t *testing.T, siteJSON string) string {
 		"templates/help.html":         `{{define "content"}}<h1>Help for {{.Path}}</h1>{{end}}{{template "layout.html" .}}`,
 		"app/index.html":              `<title>Shell</title>`,
 		"static/app/assets/main.js":   `console.log(1)`,
-		"static/govuk/govuk.css":      `body{}`,
+		"static/design/design.css":    `body{}`,
 		"static/brand/logo.svg":       `<svg/>`,
 		"static/.hidden":              `no`,
 		"static/sub/.hidden/file.txt": `no`,
@@ -55,7 +55,7 @@ const siteJSON = `{
     {"prefix": "/workspace", "index": "app/index.html"},
     {"prefix": "/operations", "index": "app/index.html"}
   ],
-  "static": {"prefix": "/static/", "dir": "static"},
+  "static": {"prefix": "/static/", "dir": "static", "immutable": ["app/assets/", "design/"]},
   "console": "/console",
   "join": "/workspace/join"
 }`
@@ -119,7 +119,7 @@ func TestAdopterSiteRoutes(t *testing.T) {
 		{"/workspace/tasks/42", 200, "<title>Shell</title>", "text/html; charset=utf-8", "no-cache"},
 		{"/operations/queue", 200, "<title>Shell</title>", "text/html; charset=utf-8", "no-cache"},
 		{"/static/app/assets/main.js", 200, "console.log(1)", "", "public, max-age=31536000, immutable"},
-		{"/static/govuk/govuk.css", 200, "body{}", "", "public, max-age=31536000, immutable"},
+		{"/static/design/design.css", 200, "body{}", "", "public, max-age=31536000, immutable"},
 		{"/static/brand/logo.svg", 200, "<svg/>", "", "no-cache"},
 		{"/static/.hidden", 404, "no such endpoint", "", ""},
 		{"/static/sub/.hidden/file.txt", 404, "no such endpoint", "", ""},
@@ -229,6 +229,9 @@ func TestAdopterSiteDefectsAreRefusedAtStartup(t *testing.T) {
 		{"missing static dir",
 			`{"title":"x","static":{"prefix":"/static/","dir":"nope"}}`,
 			`static dir "nope" is not a directory under`},
+		{"immutable outside the static tree",
+			`{"title":"x","static":{"prefix":"/static/","dir":"static","immutable":["../app/"]}}`,
+			`immutable directory "../app/" must be relative`},
 		{"reserved path",
 			`{"title":"x","pages":[{"path":"/health","template":"home.html","title":"H"}]}`,
 			`page path "/health" is the register's own`},

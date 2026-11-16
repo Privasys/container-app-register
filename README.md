@@ -321,10 +321,11 @@ and is described by `site.json`:
   without a redirect, so a browser application routes under it. A shell
   may not take the root; declare a page for `/` instead.
 - **Static** files are served from the declared directory under the
-  declared prefix: no directory listings, no dotfiles. Files under
-  `app/assets/` and `govuk/` are hashed build output and the vendored
-  design system, served `public, max-age=31536000, immutable`;
-  everything else `no-cache`.
+  declared prefix: no directory listings, no dotfiles. Files under the
+  subdirectories `immutable` names (by default `["app/assets/"]`, a
+  shell's hashed build output; add a vendored design system's folder
+  there) are served `public, max-age=31536000, immutable`; everything
+  else `no-cache`.
 - **Console**: `GET /console` (or the path named) serves the console
   shell. Its root-level files (`/assets/`, `/vendor/`, `/brand/`,
   `/favicon.svg`, `/app-config.js`) stay at the root, so the console
