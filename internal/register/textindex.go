@@ -129,10 +129,18 @@ func (ct *classText) ingest(obj, q store.Row) int64 {
 
 // build reads the whole class, in natural-key order, a chunk at a time.
 // Changes made while it reads are read again by the first refresh, which
-// starts from the time the build started, or from the latest change it
-// read when the clock is behind the records.
+// starts from the latest change in the class when the build began: any
+// later change is at or after it. The class says when, not the clock, so
+// a build in the background reads nothing but the store.
 func (r *Register) buildText(ct *classText, tenant string, class *pack.Class) error {
-	start := r.now() - 1
+	var start int64
+	if err := r.st.Do(func(tx *store.Tx) error {
+		var err error
+		start, err = tx.Count("SELECT COALESCE(MAX(updated_at), 0) FROM " + store.Ident(class.QueryTable()))
+		return err
+	}); err != nil {
+		return err
+	}
 	after := ""
 	for {
 		var objs []store.Row
