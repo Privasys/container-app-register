@@ -17,7 +17,10 @@ RUN npm ci --no-audit --no-fund
 COPY ui ./
 RUN npm run build
 
-FROM golang:1.24-alpine AS builder
+FROM golang:1.27-alpine AS builder
+
+# The SQL engine's regular expressions in pure Go: no C library in the build.
+ENV GOFLAGS=-tags=gms_pure_go
 
 WORKDIR /src
 
