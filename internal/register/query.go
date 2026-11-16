@@ -60,20 +60,37 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 		projections[proj.Column] = true
 	}
 	clauses := []string{"o.tenant = " + store.Lit(p.Tenant), "o.class = " + store.Lit(class.Name)}
+	// The listing index serves a listing in one of the record orders with
+	// no match on the projections; SQL serves the rest through its indexes.
+	indexed := len(f.Match) == 0
+	switch f.Order {
+	case "", "updated_at", "natural_key", "status", "created_at":
+	default:
+		indexed = false
+	}
+	scoped := len(r.pk.ScopesFor(class.Name, p.Acting)) > 0
 	// joined says whether a condition or the order reads the query table;
-	// selective says whether a condition other than the text narrows the
-	// records through an index.
-	joined, selective := false, false
-	if err := r.st.Do(func(tx *store.Tx) error {
-		clause, err := r.scopeClause(tx, p, class)
-		if clause != "" {
-			clauses = append(clauses, clause)
-			joined = joined || strings.Contains(clause, "q.")
-			selective = true
+	// selective says whether SQL serves the listing.
+	joined, selective := false, !indexed
+	var inScope func(*textRow) bool
+	if scoped && indexed {
+		// The scope is checked in memory, against the listing indexes of
+		// this class and of each class it is scoped through.
+		var err error
+		if inScope, err = r.scopeFilter(p, class); err != nil {
+			return nil, err
 		}
-		return err
-	}); err != nil {
-		return nil, err
+	} else if scoped {
+		if err := r.st.Do(func(tx *store.Tx) error {
+			clause, err := r.scopeClause(tx, p, class)
+			if clause != "" {
+				clauses = append(clauses, clause)
+				joined = joined || strings.Contains(clause, "q.")
+			}
+			return err
+		}); err != nil {
+			return nil, err
+		}
 	}
 	if f.Status != "" {
 		clauses = append(clauses, "o.status = "+store.Lit(f.Status))
@@ -140,12 +157,15 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 	// Otherwise the listing index gives the candidates in order, already
 	// narrowed by status, key and text; SQL reads them a batch at a time,
 	// with every condition again, until the page is full.
-	candidates, _, err := r.listCandidates(p.Tenant, class, f.Status, f.Search, text, f.TextColumns, f.Order, f.Desc)
+	candidates, _, err := r.listCandidates(p.Tenant, class, f.Status, f.Search, text, f.TextColumns, f.Order, f.Desc, inScope)
 	if err != nil {
 		return nil, err
 	}
-	// The index has narrowed by the text, so the reads go by key alone: a
-	// text condition here would have SQL read the whole query table.
+	// The index has narrowed by the text and the scope, so the reads go by
+	// key alone: a text condition here would have SQL read the whole query
+	// table. The scope is a boundary, so each record served is checked
+	// against it again, from the record itself: a stale index can drop a
+	// record from a page, never show one outside the scope.
 	out := []ObjectSummary{}
 	for start := offset; start < len(candidates) && len(out) < limit; {
 		ids := candidates[start:min(start+limit-len(out), len(candidates))]
@@ -158,6 +178,20 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 		got, err := r.listPage(class, projections, where, order, false, len(ids), 0)
 		if err != nil {
 			return nil, err
+		}
+		if scoped {
+			kept := got[:0]
+			if err := r.st.Do(func(tx *store.Tx) error {
+				for _, s := range got {
+					if err := r.checkScope(tx, p, class, s.ID); err == nil {
+						kept = append(kept, s)
+					}
+				}
+				return nil
+			}); err != nil {
+				return nil, err
+			}
+			got = kept
 		}
 		out = append(out, got...)
 	}

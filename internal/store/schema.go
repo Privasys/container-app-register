@@ -204,6 +204,11 @@ var baseTables = []tableDDL{
 			"CREATE INDEX `task_state` ON `tasks` (tenant, state, updated_at)",
 			"CREATE INDEX `task_object` ON `tasks` (object_id)",
 			"CREATE INDEX `task_counterparty` ON `tasks` (counterparty, state)",
+			// A proposer's own proposals, and everyone's, newest first, read in
+			// index order: the listing never sorts the whole table.
+			"CREATE INDEX `task_proposer` ON `tasks` (tenant, proposer_sub, updated_at)",
+			"CREATE INDEX `task_proposer_state` ON `tasks` (tenant, proposer_sub, state, updated_at)",
+			"CREATE INDEX `task_time` ON `tasks` (tenant, updated_at)",
 		},
 	},
 	{

@@ -118,6 +118,10 @@ func TestRegisterAtScale(t *testing.T) {
 		rows, err := h.reg.PublicList("vehicle", "words", nil, 50, 0)
 		return len(rows), err
 	})
+	timed("public search, ~1/3 of records match", func() (int, error) {
+		rows, err := h.reg.PublicList("vehicle", "of vehicle 1", nil, 50, 0)
+		return len(rows), err
+	})
 	timed("public search vehicles, rare word", func() (int, error) {
 		rows, err := h.reg.PublicList("vehicle", fmt.Sprintf("of vehicle %d with", vehicles/3), nil, 50, 0)
 		return len(rows), err

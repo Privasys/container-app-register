@@ -361,3 +361,54 @@ func TestAppointmentsAreValidatedAtLoad(t *testing.T) {
 		})
 	}
 }
+
+// A listing scoped through another class, served by the listing index,
+// gives what the SQL path gives, follows later changes, and searches
+// within the scope only.
+func TestAListingScopedThroughAnotherClass(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithAppointments(t, func(doc map[string]any) {
+		doc["workflows"] = append(doc["workflows"].([]any), map[string]any{
+			"name": "move_fleet", "title": "Move a fleet", "class": "fleet", "action": "update",
+			"propose_roles": []any{"registrar"}, "approve_roles": []any{"registrar"}, "auto_approve": true,
+			"message": "Move {{object.natural_key}}",
+		})
+	}))
+	manager, fleets := setUpFleets(t, h)
+	record(t, h, "appoint_driver", map[string]any{"ref": "DA-3", "fleet_number": "F-1"})
+	keys := func(f register.ListFilter) []string {
+		t.Helper()
+		f.Class = "driver_appointment"
+		rows, err := h.reg.ListObjects(manager, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rows {
+			out = append(out, r.NaturalKey)
+		}
+		return out
+	}
+	if got := keys(register.ListFilter{Order: "natural_key"}); strings.Join(got, ",") != "DA-1,DA-3" {
+		t.Fatalf("in scope through the fleet: %v", got)
+	}
+	// The SQL path, taken for a match, agrees.
+	if got := keys(register.ListFilter{Match: map[string]string{"fleet_number": "F-1"}, Order: "natural_key"}); strings.Join(got, ",") != "DA-1,DA-3" {
+		t.Fatalf("SQL path: %v", got)
+	}
+	if got := keys(register.ListFilter{Text: "da-3"}); strings.Join(got, ",") != "DA-3" {
+		t.Fatalf("search in scope: %v", got)
+	}
+	if got := keys(register.ListFilter{Text: "da-2"}); len(got) != 0 {
+		t.Fatalf("search reached outside the scope: %v", got)
+	}
+	// The fleet changes hands: its appointments leave the manager's scope.
+	h.tick()
+	if _, err := h.reg.Propose(h.principal("registrar-1", "registrar"), "move_fleet", register.ProposeRequest{
+		ObjectID: fleets["F-1"], Payload: map[string]any{"fleet_number": "F-1", "operator": "ORG-SOUTH"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := keys(register.ListFilter{}); len(got) != 0 {
+		t.Fatalf("after the fleet moved: %v", got)
+	}
+}

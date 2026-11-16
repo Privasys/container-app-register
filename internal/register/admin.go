@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -389,22 +390,18 @@ func (r *Register) countTables() (*statusCounts, error) {
 			return nil, err
 		}
 	}
-	// Records, a chunk at a time in key order.
-	after := ""
-	for {
-		var rows []store.Row
-		if err := r.st.Do(func(tx *store.Tx) error {
-			var err error
-			rows, err = tx.Query("SELECT id FROM `objects` WHERE id > " + store.Lit(after) + " ORDER BY id LIMIT 1000")
-			return err
-		}); err != nil {
+	// Records, from the listing index of each class, which holds every
+	// record of the class and is kept for the listings anyway: once it is
+	// built, counting is reading what changed since.
+	for _, class := range r.pk.Classes {
+		ct := r.classText(r.opts.Tenant, class.Name)
+		ct.mu.Lock()
+		err := r.refreshText(ct, r.opts.Tenant, class)
+		c.objects += int64(len(ct.rows))
+		ct.mu.Unlock()
+		if err != nil {
 			return nil, err
 		}
-		c.objects += int64(len(rows))
-		if len(rows) < 1000 {
-			break
-		}
-		after = rows[len(rows)-1].Str("id")
 	}
 	c.took = time.Since(start)
 	return c, nil
@@ -493,23 +490,56 @@ func (r *Register) Status() (*Status, error) {
 
 // Tasks lists workflow proposals.
 func (r *Register) Tasks(p *auth.Principal, state string, limit int) ([]*model.Task, error) {
-	clauses := []string{"tenant = " + store.Lit(p.Tenant)}
-	if state != "" {
-		clauses = append(clauses, "state = "+store.Lit(state))
+	limit = clampLimit(limit)
+	// Each query orders by the columns of the index its conditions fix,
+	// newest first, so the engine reads the page in index order and stops.
+	page := func(where []string, order []string) ([]store.Row, error) {
+		for i := range order {
+			order[i] += " DESC"
+		}
+		return r.st.Query(fmt.Sprintf("SELECT * FROM `tasks` WHERE %s ORDER BY %s LIMIT %d",
+			joinAnd(where), strings.Join(order, ", "), limit))
 	}
-	if !p.CanOn(auth.PermApprove, "*") && !p.Can(auth.PermExplorer) {
+	tenant := "tenant = " + store.Lit(p.Tenant)
+	var rows []store.Row
+	if p.CanOn(auth.PermApprove, "*") || p.Can(auth.PermExplorer) {
+		var err error
+		if state != "" {
+			rows, err = page([]string{tenant, "state = " + store.Lit(state)}, []string{"tenant", "state", "updated_at"})
+		} else {
+			rows, err = page([]string{tenant}, []string{"tenant", "updated_at"})
+		}
+		if err != nil {
+			return nil, err
+		}
+	} else {
 		// A caller who cannot decide proposals sees their own, and the
-		// ones waiting on them as counterparty.
-		clauses = append(clauses, "(proposer_sub = "+store.Lit(p.Sub)+
-			" OR counterparty = "+store.Lit(p.Sub)+")")
-	}
-	rows, err := r.st.Query(fmt.Sprintf("SELECT * FROM `tasks` WHERE %s ORDER BY updated_at DESC LIMIT %d",
-		joinAnd(clauses), clampLimit(limit)))
-	if err != nil {
-		return nil, err
+		// ones waiting on them as counterparty: two reads, each through
+		// its index, merged newest first.
+		own := []string{tenant, "proposer_sub = " + store.Lit(p.Sub)}
+		order := []string{"tenant", "proposer_sub", "updated_at"}
+		waiting := []string{tenant, "counterparty = " + store.Lit(p.Sub)}
+		if state != "" {
+			own = append(own, "state = "+store.Lit(state))
+			order = []string{"tenant", "proposer_sub", "state", "updated_at"}
+			waiting = append(waiting, "state = "+store.Lit(state))
+		}
+		mine, err := page(own, order)
+		if err != nil {
+			return nil, err
+		}
+		theirs, err := r.st.Query(fmt.Sprintf("SELECT * FROM `tasks` WHERE %s", joinAnd(append(waiting, "proposer_sub <> "+store.Lit(p.Sub)))))
+		if err != nil {
+			return nil, err
+		}
+		rows = append(mine, theirs...)
+		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Int("updated_at") > rows[j].Int("updated_at") })
+		if len(rows) > limit {
+			rows = rows[:limit]
+		}
 	}
 	out := make([]*model.Task, 0, len(rows))
-	err = r.st.Do(func(tx *store.Tx) error {
+	err := r.st.Do(func(tx *store.Tx) error {
 		for _, row := range rows {
 			task, err := decodeTask(row)
 			if err != nil {

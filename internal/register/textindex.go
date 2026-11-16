@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/pack"
 	"github.com/Privasys/container-app-register/internal/store"
 )
@@ -35,6 +36,8 @@ type textRow struct {
 	raw              string
 	updated, created int64
 	cols             map[string]string
+	// scope holds, as written, the values a scope of the class compares.
+	scope map[string]string
 }
 
 type classText struct {
@@ -42,6 +45,8 @@ type classText struct {
 	built bool
 	since int64 // read every change from this updated_at on
 	rows  map[string]*textRow
+	// scopeCols are the projected properties the class's scopes compare.
+	scopeCols map[string]bool
 }
 
 type textIndex struct {
@@ -58,7 +63,12 @@ func (r *Register) classText(tenant, class string) *classText {
 	k := tenant + "\x00" + class
 	ct := r.text.classes[k]
 	if ct == nil {
-		ct = &classText{rows: map[string]*textRow{}}
+		ct = &classText{rows: map[string]*textRow{}, scopeCols: map[string]bool{}}
+		for _, s := range r.pk.Scopes {
+			if s.Class == class {
+				ct.scopeCols[s.Property] = true
+			}
+		}
 		r.text.classes[k] = ct
 	}
 	return ct
@@ -111,7 +121,7 @@ func (r *Register) readProjections(class *pack.Class, ids []string) (map[string]
 func (ct *classText) ingest(obj, q store.Row) int64 {
 	tr := &textRow{
 		id: obj.Str("id"), key: strings.ToLower(obj.Str("natural_key")), raw: obj.Str("natural_key"), status: obj.Str("status"),
-		updated: obj.Int("updated_at"), created: obj.Int("created_at"), cols: map[string]string{},
+		updated: obj.Int("updated_at"), created: obj.Int("created_at"), cols: map[string]string{}, scope: map[string]string{},
 	}
 	for col, v := range q {
 		if v == nil {
@@ -122,6 +132,9 @@ func (ct *classText) ingest(obj, q store.Row) int64 {
 			continue
 		}
 		tr.cols[col] = strings.ToLower(fmt.Sprint(v))
+		if ct.scopeCols[col] {
+			tr.scope[col] = fmt.Sprint(v)
+		}
 	}
 	ct.rows[tr.id] = tr
 	return tr.updated
@@ -241,7 +254,7 @@ func (r *Register) ingestChanged(ct *classText, tenant string, qs []store.Row) e
 // with search, and, when text is given, whose natural key starts with it
 // or whose named columns contain it, case aside. ok is false for an order
 // the index does not hold.
-func (r *Register) listCandidates(tenant string, class *pack.Class, status, search, text string, cols []string, order string, desc bool) (ids []string, ok bool, err error) {
+func (r *Register) listCandidates(tenant string, class *pack.Class, status, search, text string, cols []string, order string, desc bool, keep func(*textRow) bool) (ids []string, ok bool, err error) {
 	var less func(a, b *textRow) bool
 	switch order {
 	case "", "updated_at":
@@ -264,6 +277,9 @@ func (r *Register) listCandidates(tenant string, class *pack.Class, status, sear
 	text = strings.ToLower(text)
 	var hits []*textRow
 	for _, tr := range ct.rows {
+		if keep != nil && !keep(tr) {
+			continue
+		}
 		if status != "" && tr.status != status {
 			continue
 		}
@@ -318,4 +334,68 @@ func (r *Register) warmListings() {
 			}
 		}
 	}()
+}
+
+// scopeFilter tests, in memory, whether a record of the class is within
+// the scopes of the caller's acting role: any of them, as inScope does.
+// A scope through another class admits the records whose property names a
+// record of that class within the caller's scopes there, read from that
+// class's own listing index. nil when the role is not scoped in the class.
+func (r *Register) scopeFilter(p *auth.Principal, class *pack.Class) (func(*textRow) bool, error) {
+	scopes := r.pk.ScopesFor(class.Name, p.Acting)
+	if len(scopes) == 0 {
+		return nil, nil
+	}
+	var tests []func(*textRow) bool
+	for _, scope := range scopes {
+		allowed := map[string]bool{}
+		if scope.Via == "" {
+			var keys []string
+			if err := r.st.Do(func(tx *store.Tx) error {
+				var err error
+				keys, err = r.scopeKeys(tx, p)
+				return err
+			}); err != nil {
+				return nil, err
+			}
+			for _, k := range keys {
+				allowed[k] = true
+			}
+		} else {
+			via := r.pk.Class(scope.Via)
+			viaIn, err := r.scopeFilter(p, via)
+			if err != nil {
+				return nil, err
+			}
+			vct := r.classText(p.Tenant, via.Name)
+			vct.mu.Lock()
+			err = r.refreshText(vct, p.Tenant, via)
+			if err == nil {
+				for _, row := range vct.rows {
+					if viaIn == nil || viaIn(row) {
+						allowed[row.raw] = true
+					}
+				}
+			}
+			vct.mu.Unlock()
+			if err != nil {
+				return nil, err
+			}
+		}
+		prop, byKey := scope.Property, scope.Property == class.NaturalKey
+		tests = append(tests, func(tr *textRow) bool {
+			if byKey {
+				return allowed[tr.raw]
+			}
+			return allowed[tr.scope[prop]]
+		})
+	}
+	return func(tr *textRow) bool {
+		for _, t := range tests {
+			if t(tr) {
+				return true
+			}
+		}
+		return false
+	}, nil
 }
