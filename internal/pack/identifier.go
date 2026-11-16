@@ -18,7 +18,8 @@ import (
 //
 //	{year}       the year of creation, in the identifier's time zone
 //	{serial:N}   N characters of Crockford Base32 (N even, 4 to 12): a
-//	             counter for the year, turned by a keyed permutation into
+//	             counter (one per year when the format has {year}, one
+//	             for ever otherwise), turned by a keyed permutation into
 //	             a serial that looks random, never repeats and cannot be
 //	             predicted without the register's key
 //	{check}      two check digits, ISO/IEC 7064 MOD 97-10, over the
@@ -52,6 +53,16 @@ func (id *Identifier) Parts() []string {
 		out = append(out, rest[loc[0]:loc[1]])
 		rest = rest[loc[1]:]
 	}
+}
+
+// HasYear reports whether the format carries the year of creation.
+func (id *Identifier) HasYear() bool {
+	for _, part := range id.Parts() {
+		if part == "{year}" {
+			return true
+		}
+	}
+	return false
 }
 
 // SerialLength is the number of serial characters, 0 when there is none.

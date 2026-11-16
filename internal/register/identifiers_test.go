@@ -9,9 +9,11 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Privasys/container-app-register/internal/pack"
 	"github.com/Privasys/container-app-register/internal/register"
+	"github.com/Privasys/container-app-register/internal/store"
 )
 
 func TestCheckDigitsAreISO7064Mod9710(t *testing.T) {
@@ -32,6 +34,11 @@ func TestCheckDigitsAreISO7064Mod9710(t *testing.T) {
 // The car register's owners with a reference the register assigns.
 func carPackWithOwnerIdentifier(t *testing.T) []byte {
 	t.Helper()
+	return carPackWithOwnerFormat(t, "OWN-{year}-{serial:6}-{check}")
+}
+
+func carPackWithOwnerFormat(t *testing.T, format string) []byte {
+	t.Helper()
 	raw, err := os.ReadFile(packPath)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +50,7 @@ func carPackWithOwnerIdentifier(t *testing.T) []byte {
 	for _, c := range doc["classes"].([]any) {
 		if class := c.(map[string]any); class["name"] == "owner" {
 			class["identifiers"] = []any{map[string]any{
-				"property": "reference", "format": "OWN-{year}-{serial:6}-{check}", "time_zone": "Europe/Paris",
+				"property": "reference", "format": format, "time_zone": "Europe/Paris",
 			}}
 		}
 	}
@@ -84,6 +91,50 @@ func TestTheRegisterAssignsIdentifiers(t *testing.T) {
 		previous = ref
 	}
 
+}
+
+// A format without the year keeps one counter across years: on 1 January
+// it carries on, instead of starting again and assigning values that may
+// already be taken.
+func TestAnIdentifierWithoutTheYearCountsOnAcrossYears(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithOwnerFormat(t, "OWN-{serial:6}-{check}"))
+	clerk := h.principal("clerk-1", "clerk")
+	seen := map[string]bool{}
+	h.now = time.Date(2026, 12, 31, 22, 0, 0, 0, time.UTC)
+	for i := 0; i < 6; i++ {
+		if i == 3 {
+			h.now = time.Date(2027, 1, 1, 9, 0, 0, 0, time.UTC)
+		}
+		h.tick()
+		out, err := h.reg.Propose(clerk, "register_owner", register.ProposeRequest{Payload: map[string]any{
+			"kind": "company", "country": "FR", "name": "Owner " + string(rune('A'+i)),
+		}})
+		if err != nil {
+			t.Fatalf("owner %d: %v", i, err)
+		}
+		view, err := h.reg.GetObject(clerk, out.ObjectID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ref, _ := view.Version.Payload["reference"].(string)
+		if !regexp.MustCompile(`^OWN-[0-9A-HJKMNP-TV-Z]{6}-[0-9]{2}$`).MatchString(ref) || seen[ref] {
+			t.Fatalf("assigned %q (seen before: %v)", ref, seen[ref])
+		}
+		seen[ref] = true
+	}
+	counters := map[string]string{}
+	if err := h.reg.Store().Do(func(tx *store.Tx) error {
+		rows, err := tx.Query("SELECT k, v FROM `registry` WHERE k LIKE 'identifier:owner:reference%'")
+		for _, row := range rows {
+			counters[string(row.Bytes("k"))] = string(row.Bytes("v"))
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(counters) != 1 || counters["identifier:owner:reference"] != "6" {
+		t.Fatalf("counters %v, want one counter at 6", counters)
+	}
 }
 
 func TestTheSerialPermutationNeverRepeats(t *testing.T) {

@@ -121,7 +121,15 @@ func (r *Register) mintIdentifiers(tx *store.Tx, w *writeCtx, class *pack.Class,
 			continue
 		}
 		year := time.Unix(w.at, 0).In(id.Location()).Year()
-		counterKey := fmt.Sprintf("identifier:%s:%s:%d", class.Name, id.Property, year)
+		// A format with the year counts afresh each year, under a
+		// permutation of its own; one without it has one counter for
+		// ever, or a new year would assign the same values again.
+		counterKey := fmt.Sprintf("identifier:%s:%s", class.Name, id.Property)
+		scope, period := "", "the register"
+		if id.HasYear() {
+			scope, period = strconv.Itoa(year), strconv.Itoa(year)
+			counterKey += ":" + scope
+		}
 		held, err := r.registryValue(tx, counterKey)
 		if err != nil {
 			return nil, err
@@ -133,9 +141,9 @@ func (r *Register) mintIdentifiers(tx *store.Tx, w *writeCtx, class *pack.Class,
 		var value string
 		for attempts := 0; ; attempts++ {
 			if counter >= space || attempts > 64 {
-				return nil, fmt.Errorf("no %s left to assign in %d", id.Property, year)
+				return nil, fmt.Errorf("no %s left to assign in %s", id.Property, period)
 			}
-			serial := base32Crockford(permute(key, strconv.Itoa(year), counter, 5*chars), chars)
+			serial := base32Crockford(permute(key, scope, counter, 5*chars), chars)
 			counter++
 			value = formatIdentifier(id, year, serial)
 			// A changed key would change the permutation; never reuse what
