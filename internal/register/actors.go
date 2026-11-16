@@ -103,3 +103,42 @@ func (r *Register) Actors(p *auth.Principal, txns []*model.Transaction) (map[str
 	})
 	return out, err
 }
+
+// proposerActorsIn gives, by txid, the person who proposed what each
+// transaction approved: a version written by an approval shows who decided
+// it, and this is who filed it. Only for a caller who sees actors.
+func (r *Register) proposerActorsIn(tx *store.Tx, p *auth.Principal, txns []*model.Transaction) (map[string]*Actor, error) {
+	if !r.seesActors(p) {
+		return nil, nil
+	}
+	out := map[string]*Actor{}
+	for _, t := range txns {
+		if t == nil {
+			continue
+		}
+		for _, ref := range t.Envelope.Refs {
+			if ref.Type != model.RefApproves {
+				continue
+			}
+			row, err := tx.QueryOne("SELECT txid FROM `tasks` WHERE id = " + store.Lit(ref.Target))
+			if err != nil {
+				return nil, err
+			}
+			if row == nil {
+				continue
+			}
+			proposal, err := r.transactionByID(tx, row.Str("txid"))
+			if err != nil || proposal == nil {
+				return nil, err
+			}
+			actors, err := r.actorsIn(tx, p, []*model.Transaction{proposal})
+			if err != nil {
+				return nil, err
+			}
+			if a := actors[proposal.TxID]; a != nil {
+				out[t.TxID] = a
+			}
+		}
+	}
+	return out, nil
+}

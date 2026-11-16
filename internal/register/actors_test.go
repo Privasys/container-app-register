@@ -73,9 +73,29 @@ func TestAHistoryNamesWhoActed(t *testing.T) {
 	if err != nil || len(history) == 0 {
 		t.Fatal(err)
 	}
+	filed := false
 	for _, e := range history {
 		if e.Actor != nil {
 			t.Fatalf("history entry with an actor %+v", e.Actor)
+		}
+		// The version the approval wrote names who filed what it approved.
+		if e.ProposerActor != nil {
+			if e.ProposerActor.Name != "Ada North" || e.ProposerActor.Organisation != "ORG-NORTH" {
+				t.Fatalf("proposer %+v", e.ProposerActor)
+			}
+			filed = true
+		}
+	}
+	if !filed {
+		t.Fatal("the history does not say who filed the change")
+	}
+	clerkHistory, err := h.reg.History(h.principal("clerk-1", "clerk"), vehicle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range clerkHistory {
+		if e.ProposerActor != nil || e.Actor != nil {
+			t.Fatalf("a role without actors saw who acted: %+v", e)
 		}
 	}
 	if none, err := h.reg.Actors(h.principal("clerk-1", "clerk"), []*model.Transaction{out.Transaction}); err != nil || none != nil {

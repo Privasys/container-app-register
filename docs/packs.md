@@ -194,7 +194,9 @@ from their sealed profile, and the organisation they acted for (recorded
 with the change as `author.organisation`; for a change made before that
 was recorded, the organisation they belonged to then, when known). A
 history entry and a transaction carry it as `actor`; the log as
-`actors`, by transaction id. Without the flag a change names its author
+`actors`, by transaction id. A history entry whose version an approval
+wrote also carries `proposer_actor`: who filed what was approved, beside
+who decided it (or nobody, when it was approved under policy). Without the flag a change names its author
 by subject and role only, which is all a transaction ever holds: a name
 in it could not be erased. When a person's profile is erased, their
 changes go back to naming a subject. Changes the register makes on its

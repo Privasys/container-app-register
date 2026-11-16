@@ -354,6 +354,9 @@ type HistoryEntry struct {
 	Diff        map[string][2]any    `json:"diff,omitempty"`
 	// Actor is who made the change, for a role that sees actors.
 	Actor *Actor `json:"actor,omitempty"`
+	// ProposerActor is who proposed what the change approved, for a role
+	// that sees actors: the person who filed, beside the one who decided.
+	ProposerActor *Actor `json:"proposer_actor,omitempty"`
 }
 
 // History returns a record's whole timeline, newest first.
@@ -408,9 +411,14 @@ func (r *Register) History(p *auth.Principal, objectID string) ([]HistoryEntry, 
 		if err != nil {
 			return err
 		}
+		proposers, err := r.proposerActorsIn(tx, p, txns)
+		if err != nil {
+			return err
+		}
 		for i := range entries {
 			if entries[i].Transaction != nil {
 				entries[i].Actor = actors[entries[i].Transaction.TxID]
+				entries[i].ProposerActor = proposers[entries[i].Transaction.TxID]
 			}
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
