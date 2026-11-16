@@ -41,6 +41,7 @@ type Pack struct {
 	Scopes        []*Scope           `json:"scopes,omitempty"`
 	Invitations   []*InvitationRule  `json:"invitations,omitempty"`
 	Appointments  []*Appointment     `json:"appointments,omitempty"`
+	Notifications []*Notification    `json:"notifications,omitempty"`
 
 	classByName    map[string]*Class
 	workflowByName map[string]*Workflow
@@ -524,6 +525,9 @@ func (p *Pack) validate() error {
 		p.sourceByName[src.Name] = src
 	}
 	if err := p.validateAppointments(); err != nil {
+		return fmt.Errorf("pack: %w", err)
+	}
+	if err := p.validateNotifications(); err != nil {
 		return fmt.Errorf("pack: %w", err)
 	}
 	if err := p.validateInvitations(); err != nil {

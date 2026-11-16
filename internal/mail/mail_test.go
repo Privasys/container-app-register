@@ -130,3 +130,35 @@ func TestSettingsSurviveARestartAndKeepTheSecret(t *testing.T) {
 		t.Errorf("merged %+v", got)
 	}
 }
+
+func TestSendNotificationFromItsTemplate(t *testing.T) {
+	var sent map[string]any
+	m := testMailer(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/oauth2/v2.0/token") {
+			_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok", "expires_in": 3600})
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		w.WriteHeader(http.StatusAccepted)
+	})
+	tpl := `<html><head><title>{{.WorkflowTitle}}: {{.Event}}</title></head><body>{{.RecipientName}} {{.Key}} {{.BaseURL}}{{if .TestNotice}} TEST{{end}}</body></html>`
+	if err := os.WriteFile(filepath.Join(m.dir, "approved.html"), []byte(tpl), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := m.SendNotification(context.Background(), Notification{To: "ana@example.org", Template: "approved",
+		Data: map[string]any{"WorkflowTitle": "Register a vehicle", "Event": "approved", "RecipientName": "Ana", "Key": "VF1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := sent["message"].(map[string]any)
+	body := msg["body"].(map[string]any)["content"].(string)
+	if msg["subject"] != "Register a vehicle: approved" || !strings.Contains(body, "Ana VF1 https://register.example.org TEST") {
+		t.Errorf("sent %q %q", msg["subject"], body)
+	}
+	if err := m.SendNotification(context.Background(), Notification{To: "ana@example.org", Template: "../invitation"}); err == nil {
+		t.Error("a template outside the folder was read")
+	}
+	if err := m.SendNotification(context.Background(), Notification{To: "ana@example.org", Template: "missing"}); err == nil {
+		t.Error("a missing template sent something")
+	}
+}

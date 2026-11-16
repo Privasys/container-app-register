@@ -5,8 +5,9 @@
 // an Entra app registration holding the Mail.Send application permission.
 //
 // An email is a notification, not the record, and whether it arrived
-// depends on somebody else's network, so no outcome reaches the ledger.
-// A message carries a single-use link, so it is not kept in the sender's
+// depends on somebody else's network. At most the register records that
+// a notification reached a number of people, never who or where. A
+// message may carry a single-use link, so it is not kept in the sender's
 // Sent Items, and neither the address nor the link is ever logged.
 package mail
 
@@ -140,9 +141,13 @@ type Invitation struct {
 type Mailer struct {
 	settings   Settings
 	invitation *template.Template
-	client     *http.Client
-	loginURL   string
-	graphURL   string
+	// dir holds the site's email templates; notifications parse theirs
+	// from it on first use.
+	dir       string
+	templates sync.Map
+	client    *http.Client
+	loginURL  string
+	graphURL  string
 
 	mu      sync.Mutex
 	token   string
@@ -159,7 +164,7 @@ func New(s Settings, templateDir string) (*Mailer, error) {
 		return nil, fmt.Errorf("mail: %w", err)
 	}
 	return &Mailer{
-		settings: s, invitation: tpl,
+		settings: s, invitation: tpl, dir: templateDir,
 		client:   &http.Client{Timeout: 20 * time.Second},
 		loginURL: "https://login.microsoftonline.com",
 		graphURL: "https://graph.microsoft.com",
@@ -209,6 +214,66 @@ func (m *Mailer) SendInvitation(ctx context.Context, inv Invitation) error {
 	}
 	return m.send(ctx, inv.To, subject, body)
 }
+
+// Notification is one email about a workflow event, written from the
+// site's template emails/<Template>.html, whose <title> is the subject.
+type Notification struct {
+	To       string
+	Template string
+	// Data is what the template reads; the sender's own settings are
+	// added as BaseURL, Office, OrganisationName, SupportEmail and
+	// TestNotice.
+	Data map[string]any
+}
+
+var notificationName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+func (m *Mailer) notificationTemplate(name string) (*template.Template, error) {
+	if !notificationName.MatchString(name) {
+		return nil, fmt.Errorf("mail: %q is not a template name", name)
+	}
+	if t, ok := m.templates.Load(name); ok {
+		return t.(*template.Template), nil
+	}
+	t, err := template.ParseFiles(filepath.Join(m.dir, name+".html"))
+	if err != nil {
+		return nil, fmt.Errorf("mail: template %s: %w", name, err)
+	}
+	m.templates.Store(name, t)
+	return t, nil
+}
+
+// SendNotification writes one notification to one person.
+func (m *Mailer) SendNotification(ctx context.Context, n Notification) error {
+	if !ValidAddress(n.To) {
+		return errors.New("mail: not a usable address")
+	}
+	tpl, err := m.notificationTemplate(n.Template)
+	if err != nil {
+		return err
+	}
+	s := m.settings
+	data := map[string]any{}
+	for k, v := range n.Data {
+		data[k] = v
+	}
+	data["BaseURL"] = strings.TrimRight(s.BaseURL, "/")
+	data["Office"], data["OrganisationName"], data["SupportEmail"] = s.Office, s.Organisation, s.SupportEmail
+	data["TestNotice"] = !s.Production
+	var buf bytes.Buffer
+	if err := tpl.Execute(&buf, data); err != nil {
+		return fmt.Errorf("mail: %w", err)
+	}
+	found := titlePattern.FindSubmatch(buf.Bytes())
+	if found == nil {
+		return fmt.Errorf("mail: template %s has no title", n.Template)
+	}
+	return m.send(ctx, n.To, html.UnescapeString(strings.TrimSpace(string(found[1]))), buf.String())
+}
+
+// BaseURL is the address people reach this register at, without a
+// trailing slash.
+func (m *Mailer) BaseURL() string { return strings.TrimRight(m.settings.BaseURL, "/") }
 
 func (m *Mailer) send(ctx context.Context, to, subject, body string) error {
 	token, err := m.accessToken(ctx)

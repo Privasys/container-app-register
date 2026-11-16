@@ -77,6 +77,8 @@ type Register struct {
 	opts Options
 
 	notify Notifier
+	// notices sends the notifications that follow workflow events.
+	notices NoticeSink
 
 	// mu guards the in-memory view of the last checkpoint. Ledger
 	// serialisation is the store's job.

@@ -232,6 +232,10 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 	if err != nil {
 		return nil, err
 	}
+	r.emit(out.Task, pack.EventProposed, out.Transaction, "")
+	if out.Applied != nil {
+		r.emit(out.Task, pack.EventApproved, out.Applied, "")
+	}
 	return out, nil
 }
 
@@ -319,6 +323,12 @@ func (r *Register) Accept(p *auth.Principal, taskID string, accept bool, reason 
 	if err != nil {
 		return nil, err
 	}
+	switch {
+	case !accept:
+		r.emit(out.Task, pack.EventRejected, out.Transaction, reason)
+	case out.Applied != nil:
+		r.emit(out.Task, pack.EventApproved, out.Applied, "")
+	}
 	return out, nil
 }
 
@@ -355,6 +365,11 @@ func (r *Register) Decide(p *auth.Principal, taskID string, d Decision) (*Outcom
 	})
 	if err != nil {
 		return nil, err
+	}
+	if d.Approve {
+		r.emit(out.Task, pack.EventApproved, out.Applied, d.Reason)
+	} else {
+		r.emit(out.Task, pack.EventRejected, out.Transaction, d.Reason)
 	}
 	return out, nil
 }
@@ -420,6 +435,7 @@ func (r *Register) Return(p *auth.Principal, taskID, reason string) (*Outcome, e
 	if err != nil {
 		return nil, err
 	}
+	r.emit(out.Task, pack.EventReturned, out.Transaction, reason)
 	return out, nil
 }
 

@@ -312,6 +312,11 @@ func (a *application) configure(document []byte) (*register.Register, auth.Verif
 		go a.followPrimary(ctx, reg)
 	} else {
 		go a.invitationLoop(ctx, reg)
+		// The notifications that follow workflow events; a standby,
+		// which takes no decisions, writes to nobody.
+		notices := api.NewNoticeSender(a.server, reg, a.log)
+		reg.SetNoticeSink(notices)
+		go notices.Run(ctx)
 	}
 
 	status, _ := reg.Status()

@@ -277,6 +277,45 @@ A pack whose scoped roles are all held by appointment needs no
 role, and the values of `keys`), and `GET /api/v1/members` lists each
 current holding with the `appointment` that gives it.
 
+## Notifications
+
+A pack can have the register write to people when a workflow event
+happens:
+
+```json
+"notifications": [
+  { "on": "first_registration:approved", "template": "vehicle-registered",
+    "to": [{ "proposer_organisation": true }, { "role": "fleet_manager" }] },
+  { "on": "first_registration:returned", "template": "more-information",
+    "to": [{ "proposer": true }] }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `on` | `<workflow>:<event>`, the event one of `proposed`, `approved`, `rejected`, `returned`. A proposal approved under policy is `proposed`, then `approved`. A counterparty who declines is `rejected`. |
+| `template` | The site's email template `emails/<template>.html`. Its `<title>` is the subject. |
+| `to` | Recipient rules, each setting one of: `role` (everyone the register gives that role, by grant, organisation or appointment, whose scope admits the record), `proposer_organisation` (every member of the proposer's organisation), `proposer`. |
+
+Recipients are resolved once the event's transaction has committed,
+from what is true then. Each person receives one email, at the address
+the register holds for them; a person with none is skipped. Roles an
+identity provider asserts at sign-in are not known to the register and
+reach nobody. Sending never touches the transaction: each email is tried
+three times and failures are logged. When a notice has reached anyone,
+the history records `Notified N people: <workflow> <event>, <class> <key>`
+as a `notification.sent` transaction, never who or where. A register
+without an email sender skips notifications silently.
+
+The template receives `WorkflowTitle`, `Workflow`, `Event`, `ClassTitle`,
+`Class`, `Key` (the record's natural key), `TaskID`, `Reason` (the
+reviewer's, on a rejection or return), `RecipientName`, `Public` (the
+record's public fields, for a class that has any), `RecordURL` (the
+page the site's `records` names for the class, on the register's
+address, when there is one), and the sender's `BaseURL`, `Office`,
+`OrganisationName`, `SupportEmail` and `TestNotice`. Nothing else of the
+record reaches an email.
+
 ## Saved queries
 
 ```json

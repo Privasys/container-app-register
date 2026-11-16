@@ -60,6 +60,7 @@ const (
 	KindInviteExpire       = "invite.expire"
 	KindSourceImport       = "source.import"
 	KindOrganisationRecord = "organisation.record"
+	KindNotificationSent   = "notification.sent"
 	KindAffiliationAdmin   = "affiliation.admin"
 	KindPackSeed           = "pack.seed"
 )
