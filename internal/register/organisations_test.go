@@ -357,3 +357,39 @@ func TestARecordInAnyOfSeveralScopesIsInScope(t *testing.T) {
 		t.Fatalf("in scope: %v", keys)
 	}
 }
+
+// A proof is a read: a role scoped to its organisation's records proves
+// those, and neither proves nor learns another organisation's record. An
+// absence proof says only that a key is not registered.
+func TestAProofStaysWithinTheScope(t *testing.T) {
+	h := newHarnessWith(t, t.TempDir(), carPackWithOrganisations(t))
+	recordOrganisations(t, h, "ORG-NORTH", "ORG-SOUTH")
+	join(t, h, "operator-1", "sub-north-1", register.InviteRequest{Role: "police", Organisation: "ORG-NORTH"})
+	police := h.principal("sub-north-1", "police")
+	ids := map[string]string{}
+	rows, err := h.reg.ListObjects(h.principal("operator-1", "operator"), register.ListFilter{Class: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		ids[r.NaturalKey] = r.ID
+	}
+	if _, err := h.reg.RecordEvidence(police, ids["ORG-NORTH"], 1); err != nil {
+		t.Fatalf("proof of its own organisation's record: %v", err)
+	}
+	if _, err := h.reg.RecordEvidence(police, ids["ORG-SOUTH"], 1); err == nil {
+		t.Fatal("proved another organisation's record")
+	}
+	if _, err := h.reg.NaturalKeyEvidence(police, "owner", "ORG-SOUTH"); err == nil {
+		t.Fatal("proved another organisation's key")
+	}
+	if b, err := h.reg.NaturalKeyEvidence(police, "owner", "ORG-NORTH"); err != nil || !b.Present {
+		t.Fatalf("own key: %+v %v", b, err)
+	}
+	if b, err := h.reg.NaturalKeyEvidence(police, "owner", "ORG-NOWHERE"); err != nil || b.Present {
+		t.Fatalf("absence: %+v %v", b, err)
+	}
+	if _, err := h.reg.NaturalKeyEvidence(police, "lien", "L-1"); err == nil {
+		t.Fatal("proved a key of a class the role may not read")
+	}
+}

@@ -581,12 +581,16 @@ func coerceParam(param pack.QueryParam, raw string) (any, error) {
 
 // -- verified reads --------------------------------------------------------
 
-// Evidence returns a row together with the proof that it is part of the
+// evidence returns a row together with the proof that it is part of the
 // register's authenticated state, signed, and anchored to the latest
 // checkpoint. This is the artefact a court can be handed: it verifies
 // with nothing but the bundle, the register's public key, and a
 // checkpoint the holder already had.
-func (r *Register) Evidence(p *auth.Principal, table string, pk []any, statement string) (*model.EvidenceBundle, error) {
+//
+// It checks only the proofs permission: its callers check that the caller
+// may read what is proved, as a read would. A bundle carries the row as
+// stored, so personal data in it is sealed, never in the clear.
+func (r *Register) evidence(p *auth.Principal, table string, pk []any, statement string) (*model.EvidenceBundle, error) {
 	if !p.Can(auth.PermProofs) {
 		return nil, fmt.Errorf("%s may not fetch proofs", p.Acting)
 	}
@@ -639,15 +643,31 @@ func (r *Register) Evidence(p *auth.Principal, table string, pk []any, statement
 	return out, nil
 }
 
-// RecordEvidence proves one record version.
+// RecordEvidence proves one record version, to a caller who may read the
+// record: its class, and the record within their scope.
 func (r *Register) RecordEvidence(p *auth.Principal, objectID string, version uint64) (*model.EvidenceBundle, error) {
-	return r.Evidence(p, "record_versions", []any{objectID, version},
+	if err := r.st.Do(func(tx *store.Tx) error {
+		row, err := r.objectRow(tx, p.Tenant, objectID)
+		if err != nil {
+			return err
+		}
+		class := r.pk.Class(row.Str("class"))
+		if class == nil || !p.CanOn(auth.PermRead, row.Str("class")) {
+			return fmt.Errorf("%s may not read %s records", p.Acting, row.Str("class"))
+		}
+		return r.checkScope(tx, p, class, objectID)
+	}); err != nil {
+		return nil, err
+	}
+	return r.evidence(p, "record_versions", []any{objectID, version},
 		fmt.Sprintf("version %d of record %s", version, objectID))
 }
 
 // NaturalKeyEvidence proves that a natural key is, or is not,
 // registered. An absence proof is the answer to "this vehicle was never
-// registered here", and it is a proof rather than a silence.
+// registered here", and it is a proof rather than a silence. The caller
+// must be able to read the class, and, when the key is registered, the
+// record within their scope.
 func (r *Register) NaturalKeyEvidence(p *auth.Principal, class, naturalKey string) (*model.EvidenceBundle, error) {
 	c := r.pk.Class(class)
 	if c == nil {
@@ -656,7 +676,20 @@ func (r *Register) NaturalKeyEvidence(p *auth.Principal, class, naturalKey strin
 	if c.NaturalKey == "" {
 		return nil, fmt.Errorf("%s records have no natural key", class)
 	}
-	return r.Evidence(p, "natural_keys", []any{p.Tenant, class, naturalKey},
+	if !p.CanOn(auth.PermRead, c.Name) {
+		return nil, fmt.Errorf("%s may not read %s records", p.Acting, c.Name)
+	}
+	if err := r.st.Do(func(tx *store.Tx) error {
+		row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +
+			" AND class = " + store.Lit(c.Name) + " AND natural_key = " + store.Lit(naturalKey))
+		if err != nil || row == nil {
+			return err
+		}
+		return r.checkScope(tx, p, c, row.Str("id"))
+	}); err != nil {
+		return nil, err
+	}
+	return r.evidence(p, "natural_keys", []any{p.Tenant, class, naturalKey},
 		fmt.Sprintf("whether %s %q is registered", c.NaturalKey, naturalKey))
 }
 

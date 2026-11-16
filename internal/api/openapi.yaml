@@ -432,7 +432,7 @@ paths:
   /api/v1/proofs/records/{id}/{version}:
     get:
       tags: [Proofs]
-      summary: A signed evidence bundle for one record version
+      summary: A signed evidence bundle for one record version, for a caller with proofs who may read the record (its class, within their scope)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: version, in: path, required: true, schema: { type: integer } }
@@ -446,7 +446,7 @@ paths:
   /api/v1/proofs/natural-keys/{class}/{key}:
     get:
       tags: [Proofs]
-      summary: Prove that a natural key is, or is not, registered
+      summary: Prove that a natural key is, or is not, registered (proofs, read on the class, and the record within scope when the key is registered)
       description: |
         An absent key comes back with an absence proof, not with silence:
         "this vehicle was never registered here" is a statement the
