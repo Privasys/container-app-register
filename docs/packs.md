@@ -351,7 +351,8 @@ the member's bound wallet, and answers `428` with `error: "step_up_required"`,
 when no push reached the wallet) and `expires_at`. The page polls
 `GET /api/v1/step-up/{approval_id}` (`pending`, `approved`, `declined`,
 `expired`) and, once approved, sends the same request again with the header
-`Step-Up-Approval: <approval_id>`. The register holds the token the
+`Step-Up-Approval: <approval_id>` (or the query parameter
+`step_up_approval`, for a transport that sets no headers). The register holds the token the
 identity provider issued, checks it names the member's bound wallet and the
 operation it is about to commit, and commits. The transaction's envelope
 records the `approval` (operation hash, wallet, approval identifier, time),

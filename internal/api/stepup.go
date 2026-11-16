@@ -21,13 +21,18 @@ import (
 // shows, whether a push reached the wallet, and a link to show as a QR
 // code when it did not. The page polls GET /api/v1/step-up/{approval_id};
 // once the answer is "approved" it sends the same request again with the
-// header Step-Up-Approval: <approval_id>. The register holds the token
+// header Step-Up-Approval: <approval_id> (or ?step_up_approval=<id>, for a
+// transport that sets no headers). The register holds the token
 // the identity provider issued, so it never passes through the browser,
 // and admits the act only if what it is about to commit is what was
 // approved. Acting with no wallet bound is refused with 412.
 
 // StepUpHeader carries the approval an act is sent again with.
 const StepUpHeader = "Step-Up-Approval"
+
+// StepUpParam names the approval in the query, for a transport that
+// cannot set headers; the header wins when both are given.
+const StepUpParam = "step_up_approval"
 
 // ApprovalService is the identity provider's approval service, set by
 // configuration; nil, acts that need an approval cannot be approved.
@@ -167,6 +172,10 @@ func (s *Server) stepUpState(req *request) (any, error) {
 // approvalFor finds the approval a request is sent again with.
 func (s *Server) approvalFor(r *http.Request, p *auth.Principal) (string, *auth.Approval, error) {
 	id := r.Header.Get(StepUpHeader)
+	if id == "" {
+		// A transport that sets no headers names it in the query.
+		id = r.URL.Query().Get(StepUpParam)
+	}
 	if id == "" {
 		return "", nil, nil
 	}

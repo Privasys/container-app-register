@@ -123,7 +123,13 @@ func TestMembersSeeAndRemoveTheirWalletsOverHTTP(t *testing.T) {
 	registrar := "dev:registrar-1:Registrar:register:registrar"
 	operator := "dev:operator-1:Operator:register:operator"
 	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, "")
-	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", operator, "")
+	// A transport that sets no headers names the approval in the query.
+	_, asked := stepCall(t, ts, http.MethodPost, "/api/v1/me/wallets", operator, "", "")
+	id, _ := asked["approval_id"].(string)
+	stepCall(t, ts, http.MethodGet, "/api/v1/step-up/"+id, operator, "", "")
+	if status, body := stepCall(t, ts, http.MethodPost, "/api/v1/me/wallets?step_up_approval="+id, operator, "", ""); status != http.StatusOK {
+		t.Fatalf("bind with the approval in the query: %d %v", status, body)
+	}
 
 	status, mine := stepCall(t, ts, http.MethodGet, "/api/v1/me/wallets", registrar, "", "")
 	if status != http.StatusOK || len(mine["wallets"].([]any)) != 1 {
