@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,9 +44,13 @@ type Site struct {
 	// Records names the page that shows one record of a class, with
 	// {key} for its natural key: where an identifier resolves to.
 	Records map[string]string `json:"records,omitempty"`
+	// Data names JSON files of the site, loaded at start and given to every
+	// page as .Data.<name>: labels, code lists, what the adopter owns.
+	Data map[string]string `json:"data,omitempty"`
 
 	dir   string
 	pages map[string]*template.Template // by page path
+	data  map[string]any
 }
 
 // SitePage is a server-rendered page.
@@ -53,6 +58,9 @@ type SitePage struct {
 	Path     string `json:"path"`
 	Template string `json:"template"`
 	Title    string `json:"title"`
+	// Reads are what the page reads from the public reader before it
+	// renders. See site_reads.go.
+	Reads *siteReads `json:"reads,omitempty"`
 }
 
 // SiteShell is a single-page application served for a whole prefix.
@@ -95,6 +103,15 @@ type siteData struct {
 	Pages    []SitePage
 	Register siteRegister
 	Now      time.Time
+	// Reads holds each read by name: a record, a list, or nil.
+	Reads map[string]any
+	// Missing says a required read found nothing; the page is a 404.
+	Missing bool
+	// Params are the path's wildcards; Query the query string.
+	Params map[string]string
+	Query  url.Values
+	// Data holds the site's data files.
+	Data map[string]any
 }
 
 // siteRegister is the little a public page may say about the register
@@ -149,6 +166,9 @@ func loadSite(dir string) (*Site, error) {
 	if err := site.validate(); err != nil {
 		return nil, err
 	}
+	if err := site.loadData(); err != nil {
+		return nil, err
+	}
 	if err := site.parseTemplates(); err != nil {
 		return nil, err
 	}
@@ -190,10 +210,24 @@ func (site *Site) validate() error {
 		if p.Template == "" || strings.Contains(p.Template, "/") || strings.Contains(p.Template, "\\") {
 			return fmt.Errorf("site: page %q names template %q; a template is a file name under templates/", p.Path, p.Template)
 		}
+		if err := validPattern(p.Path); err != nil {
+			return fmt.Errorf("site: page %q: %w", p.Path, err)
+		}
+		if err := p.validateReads(); err != nil {
+			return err
+		}
 	}
 	for _, sh := range site.Shells {
 		if sh.Prefix == "/" {
 			return errors.New("site: a shell may not take the root; declare a page for / instead")
+		}
+		// A page at a shell's own path wins it; the shell keeps the paths
+		// below.
+		if seen[sh.Prefix] == "page" {
+			if err := site.exists(sh.Index, "shell "+sh.Prefix+" index"); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := claim(sh.Prefix, "shell"); err != nil {
 			return err
@@ -264,7 +298,7 @@ func (site *Site) parseTemplates() error {
 	for _, p := range site.Pages {
 		isPage[p.Template] = true
 	}
-	base := template.New("")
+	base := template.New("").Funcs(siteFuncs)
 	for _, f := range files {
 		if isPage[filepath.Base(f)] {
 			continue
@@ -314,9 +348,16 @@ func registerSite(mux *http.ServeMux, s *Server) {
 		}
 		mux.HandleFunc(pattern, s.sitePage(p))
 	}
+	isPage := map[string]bool{}
+	for _, p := range site.Pages {
+		isPage[p.Path] = true
+	}
 	for _, sh := range site.Shells {
 		h := s.siteShell(sh)
-		mux.HandleFunc("GET "+sh.Prefix, h)
+		if !isPage[sh.Prefix] {
+			mux.HandleFunc("GET "+sh.Prefix, h)
+		}
+		// A page pattern below the prefix is more specific, so it wins.
 		mux.HandleFunc("GET "+sh.Prefix+"/", h)
 	}
 	if st := site.Static; st != nil {
@@ -352,6 +393,31 @@ func (s *Server) sitePage(p SitePage) http.HandlerFunc {
 			Pages:    s.site.Pages,
 			Register: info,
 			Now:      time.Now().UTC(),
+			Params:   map[string]string{},
+			Query:    r.URL.Query(),
+			Data:     s.site.data,
+			Reads:    map[string]any{},
+		}
+		for _, m := range patternField.FindAllStringSubmatch(p.Path, -1) {
+			data.Params[m[1]] = r.PathValue(m[1])
+		}
+		status := http.StatusOK
+		if p.Reads != nil {
+			// A page that reads the register waits for it to open.
+			if reg == nil || state != StateReady {
+				writeError(w, http.StatusServiceUnavailable, "the register is not open yet", "")
+				return
+			}
+			reads, missing, err := s.runReads(reg, p, r)
+			if err != nil {
+				s.log.Error("site page reads", "path", p.Path, "err", err)
+				writeError(w, http.StatusInternalServerError, "the page could not be read", "")
+				return
+			}
+			data.Reads, data.Missing = reads, missing
+			if missing {
+				status = http.StatusNotFound
+			}
 		}
 		var buf strings.Builder
 		if err := t.Execute(&buf, data); err != nil {
@@ -361,6 +427,7 @@ func (s *Server) sitePage(p SitePage) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(status)
 		_, _ = w.Write([]byte(buf.String()))
 	}
 }

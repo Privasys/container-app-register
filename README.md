@@ -313,13 +313,46 @@ and is described by `site.json`:
   `{{define "content"}}…{{end}}{{template "layout.html" .}}`. A page
   receives `.Title`, `.Path`, `.Site` (the site title), `.Pages`,
   `.Register` (`Name`, `Version`, `State`, and `Title`, the pack's
-  title once configured) and `.Now`. Pages hold no register data and
-  render before the configure gate lifts, like the console shell; they
-  are served `no-cache`.
+  title once configured), `.Now`, `.Params` (the path's wildcards),
+  `.Query` (the query string), `.Data` and `.Reads` (below). A page
+  without reads holds no register data and renders before the configure
+  gate lifts, like the console shell; pages are served `no-cache`.
+- **Public data pages**: a page may read the register before it renders,
+  through the public reader and under its rules (anonymous, public
+  fields only), so the register's public face needs no JavaScript.
+  Reads run in the order written; a value may name `{path.x}`,
+  `{query.x}` or `{<read>.<dotted path>}` of an earlier read (an
+  envelope stands for its `value`):
+
+  ```json
+  {"path": "/vehicles/{key}", "template": "vehicle.html", "title": "Vehicle",
+   "reads": {
+     "vehicle": {"class": "vehicle", "key": "{path.key}", "required": true},
+     "fleet":   {"class": "fleet", "key": "{vehicle.fields.fleet_number}"},
+     "inspections": {"class": "inspection", "match": {"vin": "{path.key}"}, "full": true},
+     "results": {"class": "vehicle", "q": "{query.q}", "limit": 50}}}
+  ```
+
+  A read by `key` gives one record as `GET /public/v1/{class}/{key}` does
+  (with its history), or nil. Otherwise it lists, as
+  `GET /public/v1/{class}` does, with `q`, `match`, `limit` and
+  `offset`; `full` reads each listed record whole. A `required` read
+  that finds nothing makes the page a 404 that still renders, with
+  `.Missing` true. A page with reads answers 503 until the register is
+  open. Templates may call `dict`, `list`, `join`, `lower`, `upper`,
+  `contains`, `hasPrefix`, `date` (a Unix time or an RFC 3339 or ISO
+  date as "2 January 2006"), `kind` (string, number, bool, list, map,
+  null), `json` and `default`.
+- **Data**: `"data": {"form": "static/forms/vehicle.json"}` loads site
+  JSON files at start, given to every page as `.Data.form`: labels and
+  code lists the adopter owns.
 - **Shells** answer for their whole prefix: `/workspace`, `/workspace/`
   and `/workspace/anything` all serve the declared index, `no-cache`,
   without a redirect, so a browser application routes under it. A shell
-  may not take the root; declare a page for `/` instead.
+  may not take the root; declare a page for `/` instead. A page may take
+  a shell's own path, or a pattern below it (`/vehicles`,
+  `/vehicles/{key}`): the page answers there and the shell keeps the
+  rest.
 - **Static** files are served from the declared directory under the
   declared prefix: no directory listings, no dotfiles. Files under the
   subdirectories `immutable` names (by default `["app/assets/"]`, a
