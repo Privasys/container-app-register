@@ -29,6 +29,7 @@ type mailConfiguration struct {
 	Organisation string `json:"mail_organisation,omitempty"`
 	SignInMethod string `json:"mail_sign_in_method,omitempty"`
 	SupportEmail string `json:"mail_support_email,omitempty"`
+	TimeZone     string `json:"mail_time_zone,omitempty"`
 	Production   bool   `json:"mail_production,omitempty"`
 }
 
@@ -36,7 +37,7 @@ func (c mailConfiguration) settings() mail.Settings {
 	return mail.Settings{
 		TenantID: c.TenantID, ClientID: c.ClientID, ClientSecret: c.ClientSecret, Sender: c.Sender,
 		BaseURL: c.BaseURL, Office: c.Office, Organisation: c.Organisation,
-		SignInMethod: c.SignInMethod, SupportEmail: c.SupportEmail, Production: c.Production,
+		SignInMethod: c.SignInMethod, SupportEmail: c.SupportEmail, TimeZone: c.TimeZone, Production: c.Production,
 	}
 }
 

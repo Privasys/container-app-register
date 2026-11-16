@@ -101,6 +101,11 @@
                         "description": "Where an invitation tells people to ask if they are unsure it is genuine.",
                         "x-privasys": {"label":"Email: support address"}
                     },
+                    "mail_time_zone": {
+                        "type": "string",
+                        "description": "The time zone emails give local times in, as an IANA name (Europe/London). UTC when empty.",
+                        "x-privasys": {"label":"Email: time zone"}
+                    },
                     "mail_production": {
                         "type": "boolean",
                         "description": "This is the production instance: emails do not carry the test notice.",

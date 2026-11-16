@@ -32,9 +32,11 @@ type Notice struct {
 	Event         string
 	TaskID        string
 	TxID          string
-	Class         string
-	ClassTitle    string
-	ObjectID      string
+	// At is when the event was committed, in Unix seconds.
+	At         int64
+	Class      string
+	ClassTitle string
+	ObjectID   string
 	// Key is the record's natural key, or the one the proposal names.
 	Key string
 	// Reason is the reviewer's reason, on a rejection or a return.
@@ -105,6 +107,7 @@ func (r *Register) resolveNotice(tx *store.Tx, n *pack.Notification, task *model
 	}
 	if txn != nil {
 		out.TxID = txn.TxID
+		out.At = txn.Envelope.Timestamp
 	}
 	if class == nil {
 		return out, nil

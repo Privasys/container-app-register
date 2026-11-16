@@ -111,6 +111,9 @@ func (n *NoticeSender) data(mailer NoticeMailer, notice register.Notice, to regi
 		"TaskID": notice.TaskID, "Reason": notice.Reason, "RecipientName": to.Name,
 		"Public": notice.Public, "RecordURL": "",
 	}
+	if notice.At != 0 {
+		out["At"] = time.Unix(notice.At, 0).UTC().Format(time.RFC3339)
+	}
 	if n.srv != nil && n.srv.site != nil && notice.Key != "" {
 		if page, ok := n.srv.site.Records[notice.Class]; ok {
 			out["RecordURL"] = mailer.BaseURL() + strings.ReplaceAll(page, "{key}", url.PathEscape(notice.Key))

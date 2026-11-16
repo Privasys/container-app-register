@@ -49,6 +49,8 @@ type Settings struct {
 	Organisation string `json:"organisation,omitempty"`
 	SignInMethod string `json:"sign_in_method,omitempty"`
 	SupportEmail string `json:"support_email,omitempty"`
+	// TimeZone is the IANA zone an email gives local times in; UTC when empty.
+	TimeZone string `json:"time_zone,omitempty"`
 	// Production removes the test notice every other instance's emails carry.
 	Production bool `json:"production,omitempty"`
 }
@@ -63,7 +65,19 @@ func (s Settings) Validate() error {
 	case !strings.HasPrefix(s.BaseURL, "https://"):
 		return errors.New("mail: base_url must be https")
 	}
+	if s.TimeZone != "" {
+		if _, err := time.LoadLocation(s.TimeZone); err != nil {
+			return fmt.Errorf("mail: time_zone %q is not a time zone", s.TimeZone)
+		}
+	}
 	return nil
+}
+
+func (s Settings) location() *time.Location {
+	if loc, err := time.LoadLocation(s.TimeZone); err == nil && s.TimeZone != "" {
+		return loc
+	}
+	return time.UTC
 }
 
 // plainAddress accepts a bare address and nothing that could carry a
@@ -83,7 +97,7 @@ func (s Settings) Merge(held Settings) Settings {
 	for _, f := range []struct{ into, from *string }{
 		{&s.TenantID, &held.TenantID}, {&s.ClientID, &held.ClientID}, {&s.ClientSecret, &held.ClientSecret},
 		{&s.Sender, &held.Sender}, {&s.BaseURL, &held.BaseURL}, {&s.Office, &held.Office},
-		{&s.Organisation, &held.Organisation}, {&s.SignInMethod, &held.SignInMethod}, {&s.SupportEmail, &held.SupportEmail},
+		{&s.Organisation, &held.Organisation}, {&s.SignInMethod, &held.SignInMethod}, {&s.SupportEmail, &held.SupportEmail}, {&s.TimeZone, &held.TimeZone},
 	} {
 		if *f.into == "" {
 			*f.into = *f.from
@@ -260,6 +274,13 @@ func (m *Mailer) SendNotification(ctx context.Context, n Notification) error {
 	data["BaseURL"] = strings.TrimRight(s.BaseURL, "/")
 	data["Office"], data["OrganisationName"], data["SupportEmail"] = s.Office, s.Organisation, s.SupportEmail
 	data["TestNotice"] = !s.Production
+	// An event's time, given as RFC 3339, is also written for people, in
+	// the installation's time zone.
+	if at, ok := data["At"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, at); err == nil {
+			data["AtLocal"] = t.In(s.location()).Format("2 January 2006 at 15:04")
+		}
+	}
 	var buf bytes.Buffer
 	if err := tpl.Execute(&buf, data); err != nil {
 		return fmt.Errorf("mail: %w", err)

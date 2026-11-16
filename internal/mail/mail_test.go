@@ -141,18 +141,18 @@ func TestSendNotificationFromItsTemplate(t *testing.T) {
 		_ = json.NewDecoder(r.Body).Decode(&sent)
 		w.WriteHeader(http.StatusAccepted)
 	})
-	tpl := `<html><head><title>{{.WorkflowTitle}}: {{.Event}}</title></head><body>{{.RecipientName}} {{.Key}} {{.BaseURL}}{{if .TestNotice}} TEST{{end}}</body></html>`
+	tpl := `<html><head><title>{{.WorkflowTitle}}: {{.Event}}</title></head><body>{{.RecipientName}} {{.Key}} {{.BaseURL}} {{.AtLocal}}{{if .TestNotice}} TEST{{end}}</body></html>`
 	if err := os.WriteFile(filepath.Join(m.dir, "approved.html"), []byte(tpl), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	err := m.SendNotification(context.Background(), Notification{To: "ana@example.org", Template: "approved",
-		Data: map[string]any{"WorkflowTitle": "Register a vehicle", "Event": "approved", "RecipientName": "Ana", "Key": "VF1"}})
+		Data: map[string]any{"WorkflowTitle": "Register a vehicle", "Event": "approved", "RecipientName": "Ana", "Key": "VF1", "At": "2026-11-16T15:04:05Z"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	msg := sent["message"].(map[string]any)
 	body := msg["body"].(map[string]any)["content"].(string)
-	if msg["subject"] != "Register a vehicle: approved" || !strings.Contains(body, "Ana VF1 https://register.example.org TEST") {
+	if msg["subject"] != "Register a vehicle: approved" || !strings.Contains(body, "Ana VF1 https://register.example.org 16 November 2026 at 15:04 TEST") {
 		t.Errorf("sent %q %q", msg["subject"], body)
 	}
 	if err := m.SendNotification(context.Background(), Notification{To: "ana@example.org", Template: "../invitation"}); err == nil {
