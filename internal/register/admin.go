@@ -518,21 +518,31 @@ func (r *Register) Tasks(p *auth.Principal, state string, limit int) ([]*model.T
 		// its index, merged newest first.
 		own := []string{tenant, "proposer_sub = " + store.Lit(p.Sub)}
 		order := []string{"tenant", "proposer_sub", "updated_at"}
-		waiting := []string{tenant, "counterparty = " + store.Lit(p.Sub)}
 		if state != "" {
 			own = append(own, "state = "+store.Lit(state))
 			order = []string{"tenant", "proposer_sub", "state", "updated_at"}
-			waiting = append(waiting, "state = "+store.Lit(state))
 		}
 		mine, err := page(own, order)
 		if err != nil {
 			return nil, err
 		}
-		theirs, err := r.st.Query(fmt.Sprintf("SELECT * FROM `tasks` WHERE %s", joinAnd(append(waiting, "proposer_sub <> "+store.Lit(p.Sub)))))
+		// By the counterparty alone, so the engine reads its own index:
+		// with more conditions it would choose another and read every
+		// other proposer's tasks. The rest is checked here.
+		cp := []string{"counterparty = " + store.Lit(p.Sub)}
+		if state != "" {
+			cp = append(cp, "state = "+store.Lit(state))
+		}
+		theirs, err := r.st.Query(fmt.Sprintf("SELECT * FROM `tasks` WHERE %s", joinAnd(cp)))
 		if err != nil {
 			return nil, err
 		}
-		rows = append(mine, theirs...)
+		rows = mine
+		for _, row := range theirs {
+			if row.Str("tenant") == p.Tenant && row.Str("proposer_sub") != p.Sub {
+				rows = append(rows, row)
+			}
+		}
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Int("updated_at") > rows[j].Int("updated_at") })
 		if len(rows) > limit {
 			rows = rows[:limit]
