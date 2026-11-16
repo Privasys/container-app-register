@@ -203,6 +203,80 @@ the inviter's scope: here, a fleet manager invites the drivers of a fleet
 it manages. Outside its scope, or to another role, the
 invitation is refused.
 
+### How a role is held
+
+`held` says where a role comes from: `person` (the default), granted to
+one named person; `organisation`, held by an organisation whose members
+inherit it; `either`; or `appointment`, given by an appointment record.
+
+### Appointments
+
+An appointment is a record that names a role, held personally by the one
+person bound to it, for as long as the record is current. A designated
+driver appointed to one fleet drives for that fleet only, and colleagues
+at their own firm inherit nothing:
+
+```json
+"appointments": [
+  { "class": "driver_appointment", "role": "designated_driver",
+    "keys": ["fleet_number"], "ended_by": "ceased_on" },
+  { "class": "inspector_appointment", "role_property": "kind",
+    "roles": { "BRAKES": "brake_inspector", "EMISSIONS": "emissions_inspector" },
+    "keys": ["fleet_number", "vin"] }
+]
+```
+
+| Field | Meaning |
+|---|---|
+| `class` | The appointment class. Needs a natural key; one entry per class. |
+| `role` | The role every record of the class gives. Or: |
+| `role_property`, `roles` | The property whose value names the role, and the role each value gives. |
+| `keys` | The properties a scope compares against when the person acts under the role. |
+| `ended_by` | Optional. A property that ends the appointment when it holds a value. |
+
+Every role an appointment gives is declared `"held": "appointment"`.
+
+A record is **current** while it is in its class's initial status, its
+head version is not pruned, the record is not erased, and `ended_by`
+(when named) is empty. The person bound to a current record holds its
+role. When the record leaves its initial status, or `ended_by` is set,
+the role lapses at once: no further transaction is needed, because the
+register reads the record whenever it asks what a person holds.
+
+**Binding.** A person is bound to a record by accepting an invitation to
+it: `POST /api/v1/invites` with `role` and `appointment_key` (the
+record's natural key; `appointment_class` when several classes give the
+role), as a link or by email. Whoever manages members may invite to any
+appointment. An invitation rule whose class is an appointment class lets
+another role invite to the records within its scope:
+
+```json
+"invitations": [{ "inviter": "fleet_manager", "role": "designated_driver", "class": "driver_appointment" }]
+```
+
+The invitation is refused when the record has ended, gives another role,
+or is already held: one person per appointment. Acceptance is a
+transaction with a message, refused if the role would breach the
+person's `incompatible_with`. Whoever manages members may unbind the
+holder before the record ends, saying why:
+`DELETE /api/v1/appointments/{class}/{key}/holder?reason=…`.
+
+**Scopes.** When the acting role is held by appointment, a scope compares
+the record against the values of `keys` on the person's current
+appointments for that role (all of them, when they hold several),
+instead of their organisations' keys. Scope declarations are unchanged:
+
+```json
+{ "class": "fleet", "roles": ["designated_driver"], "property": "fleet_number" }
+```
+
+A pack whose scoped roles are all held by appointment needs no
+`organisations`.
+
+`GET /api/v1/me` lists the person's current `appointments` (class, key,
+role, and the values of `keys`), and `GET /api/v1/members` lists each
+current holding with the `appointment` that gives it.
+
 ## Saved queries
 
 ```json

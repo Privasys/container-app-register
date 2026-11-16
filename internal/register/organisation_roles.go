@@ -48,7 +48,7 @@ func (r *Register) roleKind(role string, withOrganisation bool) (string, error) 
 		}
 		return HeldByOrganisation, nil
 	case HeldByAppointment:
-		return "", fmt.Errorf("%s is given by an appointment recorded in the register, not by an invitation", role)
+		return "", fmt.Errorf("%s is given by an appointment recorded in the register: invite the person to one appointment", role)
 	}
 	return "", fmt.Errorf("role %s is held in an unknown way %q", role, spec.Held)
 }
@@ -67,8 +67,9 @@ func (r *Register) organisationRolesIn(tx *store.Tx, tenant, organisation string
 	return out, nil
 }
 
-// rolesOf is every role a person holds: granted to them, and inherited
-// from each organisation they belong to.
+// rolesOf is every role a person holds: granted to them, inherited from
+// each organisation they belong to, and given by each current appointment
+// they are bound to.
 func (r *Register) rolesOf(tx *store.Tx, tenant, sub string) ([]string, error) {
 	rows, err := tx.Query("SELECT role FROM `members` WHERE tenant = " + store.Lit(tenant) + " AND sub = " + store.Lit(sub))
 	if err != nil {
@@ -90,6 +91,13 @@ func (r *Register) rolesOf(tx *store.Tx, tenant, sub string) ([]string, error) {
 		for _, role := range roles {
 			set[role] = true
 		}
+	}
+	held, err := r.holdings(tx, tenant, sub)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range held {
+		set[h.Role] = true
 	}
 	out := make([]string, 0, len(set))
 	for role := range set {

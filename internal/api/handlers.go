@@ -300,6 +300,15 @@ func (s *Server) me(req *request) (any, error) {
 		return nil, err
 	}
 	out["affiliations"] = affiliations
+	// The appointments that give this person a role, while they are current.
+	appointments, err := req.reg.Appointments(req.p.Tenant, req.p.Sub)
+	if err != nil {
+		return nil, err
+	}
+	if appointments == nil {
+		appointments = []register.AppointmentHolding{}
+	}
+	out["appointments"] = appointments
 	out["role_titles"] = titles
 	return out, nil
 }
@@ -347,6 +356,16 @@ func (s *Server) revokeMember(req *request) (any, error) {
 	return map[string]any{"transaction": txn}, nil
 }
 
+// endAppointmentHolding unbinds whoever holds an appointment record.
+func (s *Server) endAppointmentHolding(req *request) (any, error) {
+	txn, err := req.reg.EndAppointmentHolding(req.p, req.r.PathValue("class"), req.r.PathValue("key"),
+		req.r.URL.Query().Get("reason"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
+}
+
 func (s *Server) listInvites(req *request) (any, error) {
 	invites, err := req.reg.Invites(req.p)
 	if err != nil {
@@ -365,13 +384,19 @@ func (s *Server) createInvite(req *request) (any, error) {
 		Organisation string `json:"organisation"`
 		// OrganisationKey names the organisation record the person joins.
 		OrganisationKey string `json:"organisation_key"`
+		// AppointmentKey names the appointment record the person will be
+		// bound to, and AppointmentClass its class when several give the role.
+		AppointmentKey   string `json:"appointment_key"`
+		AppointmentClass string `json:"appointment_class"`
 	}
 	if err := decode(req.r, &in); err != nil {
 		return nil, err
 	}
 	ir := register.InviteRequest{
 		Role: in.Role, Label: in.Label, ValidFor: time.Duration(in.ValidDays) * 24 * time.Hour,
-		Organisation: strings.TrimSpace(in.OrganisationKey),
+		Organisation:     strings.TrimSpace(in.OrganisationKey),
+		Appointment:      strings.TrimSpace(in.AppointmentKey),
+		AppointmentClass: strings.TrimSpace(in.AppointmentClass),
 	}
 	if in.Email != "" {
 		ir.To = &register.InviteRecipient{
@@ -473,6 +498,9 @@ func inviteView(reg *register.Register, inv *register.Invite) map[string]any {
 		return role
 	}
 	out := map[string]any{"role": inv.Role, "role_title": titleOf(inv.Role), "label": inv.Label, "expires_at": inv.ExpiresAt}
+	if inv.Appointment != "" {
+		out["appointment"] = register.AppointmentRef{Class: inv.AppointmentClass, Key: inv.Appointment}
+	}
 	if inv.Organisation != "" {
 		tenant := reg.Options().Tenant
 		name := reg.OrganisationName(tenant, inv.Organisation)

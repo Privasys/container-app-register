@@ -93,12 +93,12 @@ paths:
       tags: [Membership]
       summary: Who the caller is here, including a caller who holds no role yet
       responses:
-        "200": { description: "status is member, no_role or refused" }
+        "200": { description: "status is member, no_role or refused. A member's affiliations and current appointments (class, key, role, and the values of the appointment's keys) are listed." }
 
   /api/v1/members:
     get:
       tags: [Membership]
-      summary: Every granted role, and the roles the pack declares
+      summary: Every granted role, each current appointment with the record that gives it, and the roles the pack declares
       responses:
         "200": { description: OK }
     post:
@@ -133,6 +133,17 @@ paths:
         "200": { description: Revoked }
         "409": { description: The last member who can manage membership }
 
+  /api/v1/appointments/{class}/{key}/holder:
+    delete:
+      tags: [Membership]
+      summary: Unbind whoever holds an appointment record, before the record ends
+      parameters:
+        - { name: class, in: path, required: true, schema: { type: string } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+        - { name: reason, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Unbound }
+
   /api/v1/invites:
     get:
       tags: [Membership]
@@ -158,6 +169,15 @@ paths:
                   description: Write to this person. Sealed, like the name and organisation, and destroyed when the invitation is finished. Refused with a label, or when no sender is configured.
                 name: { type: string }
                 organisation: { type: string }
+                organisation_key:
+                  type: string
+                  description: The organisation record the person joins.
+                appointment_key:
+                  type: string
+                  description: The natural key of the appointment record the person is bound to. The role must be the one the record gives; the record must be current and unheld.
+                appointment_class:
+                  type: string
+                  description: The appointment class, when several give the role.
       responses:
         "200":
           description: Issued. An emailed invitation reports email as sent, or as failed with email_error and the link to pass on; the link is not served once the email has gone.

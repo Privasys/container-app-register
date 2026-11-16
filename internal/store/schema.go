@@ -309,6 +309,35 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// The appointment record an invitation binds its person to.
+		name: "invite_appointments",
+		ddl: `CREATE TABLE ` + "`invite_appointments`" + ` (
+			id VARCHAR(32) PRIMARY KEY,
+			class VARCHAR(64) NOT NULL,
+			natural_key VARCHAR(191) NOT NULL
+		)`,
+	},
+	{
+		// Who holds each appointment: one person per appointment record.
+		// The role is held while the record is current; the row stays
+		// when the record ends, and gives nothing from then on.
+		name: "appointment_holders",
+		ddl: `CREATE TABLE ` + "`appointment_holders`" + ` (
+			tenant VARCHAR(64) NOT NULL,
+			class VARCHAR(64) NOT NULL,
+			natural_key VARCHAR(191) NOT NULL,
+			sub VARCHAR(256) NOT NULL,
+			role VARCHAR(64) NOT NULL,
+			granted_by VARCHAR(256) NOT NULL,
+			since BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL,
+			PRIMARY KEY (tenant, class, natural_key)
+		)`,
+		indexes: []string{
+			"CREATE INDEX `appointment_holders_sub` ON `appointment_holders` (tenant, sub)",
+		},
+	},
+	{
 		// The roles an organisation holds, which its members inherit.
 		name: "organisation_roles",
 		ddl: `CREATE TABLE ` + "`organisation_roles`" + ` (

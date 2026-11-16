@@ -193,6 +193,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/organisations/{key}/roles/{role}", s.wrap(s.withdrawOrganisationRole))
 	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
 	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
+	mux.HandleFunc("DELETE /api/v1/appointments/{class}/{key}/holder", s.wrap(s.endAppointmentHolding))
 
 	mux.HandleFunc("GET /api/v1/sources/{name}/{key}", s.wrap(s.describeSource))
 	mux.HandleFunc("POST /api/v1/sources/{name}/{key}/import", s.wrap(s.importFromSource))

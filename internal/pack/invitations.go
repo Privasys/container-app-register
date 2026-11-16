@@ -10,6 +10,10 @@ import "fmt"
 // organisation whose key is that record's natural key. A fleet manager,
 // for instance, invites the drivers of a fleet it manages into the
 // fleet's organisation, without administering it.
+//
+// When Class is an appointment class, the rule instead lets the inviter
+// invite one person to one appointment record within the inviter's scope:
+// the person takes the role the record gives, and no organisation.
 type InvitationRule struct {
 	Inviter string `json:"inviter"`
 	Role    string `json:"role"`
@@ -17,10 +21,14 @@ type InvitationRule struct {
 }
 
 func (p *Pack) validateInvitations() error {
-	if len(p.Invitations) > 0 && p.Organisations == nil {
-		return fmt.Errorf("invitations need the organisations of the pack to be named")
-	}
 	for i, rule := range p.Invitations {
+		if a := p.AppointmentOf(rule.Class); a != nil {
+			if !a.Gives(rule.Role) {
+				return fmt.Errorf("invitation rule %d: an appointment of class %s does not give the role %q", i, rule.Class, rule.Role)
+			}
+		} else if p.Organisations == nil {
+			return fmt.Errorf("invitation rule %d: inviting into an organisation needs the organisations of the pack to be named", i)
+		}
 		if p.model.Role(rule.Inviter) == nil {
 			return fmt.Errorf("invitation rule %d: no role named %q", i, rule.Inviter)
 		}

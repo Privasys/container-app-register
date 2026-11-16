@@ -158,6 +158,8 @@ var pkColumns = map[string][]string{
 	"invite_organisations": {"id"},
 	"affiliations":         {"tenant", "sub", "organisation"},
 	"organisation_roles":   {"tenant", "organisation", "role"},
+	"invite_appointments":  {"id"},
+	"appointment_holders":  {"tenant", "class", "natural_key"},
 	"registry":             {"k"},
 }
 

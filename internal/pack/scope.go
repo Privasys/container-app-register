@@ -54,10 +54,14 @@ func (p *Pack) validateScopes() error {
 			return fmt.Errorf("organisations: class %s needs a natural key, which is an organisation's key", class.Name)
 		}
 	}
-	if len(p.Scopes) > 0 && p.Organisations == nil {
-		return fmt.Errorf("scopes need the organisations of the pack to be named")
-	}
 	for i, s := range p.Scopes {
+		// A role held by appointment is scoped by its appointments' keys;
+		// any other role by its organisations.
+		for _, role := range s.Roles {
+			if spec := p.model.Role(role); spec != nil && spec.Held != HeldByAppointment && p.Organisations == nil {
+				return fmt.Errorf("scope %d: scoping %s needs the organisations of the pack to be named", i, role)
+			}
+		}
 		class := p.classByName[s.Class]
 		if class == nil {
 			return fmt.Errorf("scope %d: no class named %q", i, s.Class)

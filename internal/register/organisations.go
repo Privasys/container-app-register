@@ -296,8 +296,8 @@ func (r *Register) inScope(tx *store.Tx, p *auth.Principal, class *pack.Class, p
 func (r *Register) inOneScope(tx *store.Tx, p *auth.Principal, scope *pack.Scope, payload map[string]any) (bool, error) {
 	value := fmt.Sprint(unwrap(payload[scope.Property]))
 	if scope.Via == "" {
-		orgs, err := r.organisationsOf(tx, p)
-		return slices.Contains(orgs, value), err
+		keys, err := r.scopeKeys(tx, p)
+		return slices.Contains(keys, value), err
 	}
 	via := r.pk.Class(scope.Via)
 	row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +
@@ -355,11 +355,11 @@ func (r *Register) scopeClause(tx *store.Tx, p *auth.Principal, class *pack.Clas
 func (r *Register) oneScopeClause(tx *store.Tx, p *auth.Principal, class *pack.Class, scope *pack.Scope) (string, error) {
 	var allowed []string
 	if scope.Via == "" {
-		orgs, err := r.organisationsOf(tx, p)
+		keys, err := r.scopeKeys(tx, p)
 		if err != nil {
 			return "", err
 		}
-		allowed = orgs
+		allowed = keys
 	} else {
 		via := r.pk.Class(scope.Via)
 		rows, err := tx.Query("SELECT id, natural_key FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +

@@ -39,6 +39,9 @@ type Member struct {
 	GrantedBy string `json:"granted_by"`
 	GrantedAt int64  `json:"granted_at"`
 	TxID      string `json:"txid,omitempty"`
+	// Appointment names the record that gives the role, for a role held
+	// by appointment.
+	Appointment *AppointmentRef `json:"appointment,omitempty"`
 }
 
 // Invite is a single-use link that grants a role to whoever opens it.
@@ -57,6 +60,10 @@ type Invite struct {
 	// OrganisationAdmin whether they will administer it.
 	Organisation      string `json:"organisation,omitempty"`
 	OrganisationAdmin bool   `json:"organisation_admin,omitempty"`
+	// AppointmentClass and Appointment name the appointment record the
+	// person is bound to, for an invitation to an appointment.
+	AppointmentClass string `json:"appointment_class,omitempty"`
+	Appointment      string `json:"appointment,omitempty"`
 }
 
 // Invitation lifetimes.
@@ -134,7 +141,23 @@ func (r *Register) Members(p *auth.Principal) ([]Member, error) {
 			GrantedBy: row.Str("granted_by"), GrantedAt: row.Int("granted_at"), TxID: row.Str("txid"),
 		})
 	}
-	sort.Slice(out, func(i, j int) bool {
+	// Roles held by appointment are listed while their appointment is
+	// current, with the record that gives them.
+	var held []AppointmentHolding
+	if err := r.st.Do(func(tx *store.Tx) error {
+		var err error
+		held, err = r.holdings(tx, p.Tenant, "")
+		return err
+	}); err != nil {
+		return nil, err
+	}
+	for _, h := range held {
+		out = append(out, Member{
+			Sub: h.Sub, Role: h.Role, Display: names[h.Sub], GrantedBy: h.GrantedBy, GrantedAt: h.Since, TxID: h.TxID,
+			Appointment: &AppointmentRef{Class: h.Class, Key: h.Key},
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Sub != out[j].Sub {
 			return out[i].Sub < out[j].Sub
 		}
@@ -298,6 +321,11 @@ type InviteRequest struct {
 	ValidFor     time.Duration
 	To           *InviteRecipient
 	Organisation string
+	// Appointment is the natural key of the appointment record the person
+	// will be bound to, and AppointmentClass its class when several
+	// classes give the role.
+	Appointment      string
+	AppointmentClass string
 }
 
 // Invite issues an invitation. Whoever manages the register's members may
@@ -316,6 +344,11 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 		secret string
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
+		if req.Appointment != "" {
+			var err error
+			inv, secret, err = r.inviteToAppointment(tx, p, req)
+			return err
+		}
 		org := (*inviteOrganisation)(nil)
 		if req.Organisation != "" {
 			exists, err := r.organisationExists(tx, p.Tenant, req.Organisation)
@@ -372,7 +405,7 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 			}
 		}
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, req.Role, req.Label, req.ValidFor, req.To, org)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, req.Role, req.Label, req.ValidFor, req.To, org, nil)
 		return err
 	})
 	return inv, secret, err
@@ -406,7 +439,7 @@ func (r *Register) CreateInvite(p *auth.Principal, role, label string, validFor 
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor, nil, nil)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, label, validFor, nil, nil, nil)
 		return err
 	})
 	return inv, secret, err
@@ -428,7 +461,7 @@ func (r *Register) CreateEmailedInvite(p *auth.Principal, role string, validFor 
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
-		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, "", validFor, &to, nil)
+		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, role, "", validFor, &to, nil, nil)
 		return err
 	})
 	return inv, secret, err
@@ -444,14 +477,14 @@ func (r *Register) BootstrapInvite(role string, validFor time.Duration) (*Invite
 	err := r.st.Do(func(tx *store.Tx) error {
 		var err error
 		inv, secret, err = r.createInvite(tx, r.systemAuthor("configure"), r.opts.Tenant, role,
-			"First administrator", validFor, nil, nil)
+			"First administrator", validFor, nil, nil, nil)
 		return err
 	})
 	return inv, secret, err
 }
 
 func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role, label string,
-	validFor time.Duration, to *InviteRecipient, org *inviteOrganisation) (*Invite, string, error) {
+	validFor time.Duration, to *InviteRecipient, org *inviteOrganisation, appt *inviteAppointment) (*Invite, string, error) {
 	spec := r.pk.Model().Role(role)
 	if role == "" && org != nil {
 		spec = &auth.RoleSpec{Name: "", Title: "member of organisation " + org.key}
@@ -484,13 +517,18 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 		ID: hex.EncodeToString(rawID), Role: role, Label: label, CreatedBy: author.Sub,
 		CreatedAt: at, ExpiresAt: at + int64(validFor.Seconds()), Status: "open",
 	}
+	grants := fmt.Sprintf("grants the role %q (%s)", role, orDefault(spec.Title, role))
+	if appt != nil {
+		grants = fmt.Sprintf("binds to %s %s, which gives the role %q (%s) while it is current,",
+			strings.ReplaceAll(appt.class, "_", " "), appt.key, role, orDefault(spec.Title, role))
+	}
 	env := model.Envelope{
 		Kind: model.KindInviteCreate, Tenant: tenant, Author: author, Timestamp: at,
 		Message: composeMessage(
 			clip(fmt.Sprintf("Invite %s as %s", orDefault(label, "someone"), role), model.MaxSummary),
-			fmt.Sprintf("Invitation %s grants the role %q (%s) to whoever opens it and signs in, once, "+
+			fmt.Sprintf("Invitation %s %s to whoever opens it and signs in, once, "+
 				"before %s.\nThe link's secret is not part of this record; only its hash is.",
-				inv.ID, role, orDefault(spec.Title, role), time.Unix(inv.ExpiresAt, 0).UTC().Format(time.RFC3339))),
+				inv.ID, grants, time.Unix(inv.ExpiresAt, 0).UTC().Format(time.RFC3339))),
 	}
 	ops := []model.WriteOp{{
 		Table: "invites",
@@ -506,6 +544,13 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 		ops = append(ops, model.WriteOp{
 			Table: "invite_organisations", Key: map[string]any{"id": inv.ID},
 			Values: map[string]any{"organisation": org.key, "admin": org.admin},
+		})
+	}
+	if appt != nil {
+		inv.AppointmentClass, inv.Appointment = appt.class, appt.key
+		ops = append(ops, model.WriteOp{
+			Table: "invite_appointments", Key: map[string]any{"id": inv.ID},
+			Values: map[string]any{"class": appt.class, "natural_key": appt.key},
 		})
 	}
 	if to != nil {
@@ -637,6 +682,9 @@ func (r *Register) openInvite(tx *store.Tx, tenant, id, secret string) (*Invite,
 	if err := r.inviteOrganisationOf(tx, inv); err != nil {
 		return nil, err
 	}
+	if err := r.inviteAppointmentOf(tx, inv); err != nil {
+		return nil, err
+	}
 	return inv, nil
 }
 
@@ -679,6 +727,16 @@ func (r *Register) RedeemInvite(tenant, sub, id, secret string) (*Invite, *model
 			return err
 		}
 		ops := append([]model.WriteOp{spend}, forget...)
+		if inv.Appointment != "" {
+			txn, err = r.bindAppointment(tx, tenant, sub, inv, ops, at)
+			if err == nil {
+				inv.UsedBy, inv.UsedAt, inv.Status = sub, at, "used"
+				if scope != "" {
+					r.ring.Forget(scope)
+				}
+			}
+			return err
+		}
 		kind := ""
 		if inv.Role != "" {
 			if kind, err = r.roleKind(inv.Role, inv.Organisation != ""); err != nil {
