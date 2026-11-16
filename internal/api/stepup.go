@@ -102,7 +102,13 @@ func (s *Server) askApproval(w http.ResponseWriter, r *http.Request, p *auth.Pri
 		err   error
 	)
 	if need.Bind() {
-		asked, err = svc.BeginBind(r.Context(), p.Sub, need.OpHash, need.Summary)
+		// The development stand-in names the wallet after the member and
+		// the label, so a member can bind several.
+		name := p.Sub
+		if need.Label != "" {
+			name += ":" + need.Label
+		}
+		asked, err = svc.BeginBind(r.Context(), name, need.OpHash, need.Summary)
 	} else {
 		asked, err = svc.Begin(r.Context(), need.Wallet, need.OpHash, need.Summary)
 	}

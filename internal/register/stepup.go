@@ -44,6 +44,8 @@ type StepUpRequired struct {
 	// Wallet is the bound wallet to ask (the one used last); empty when
 	// the act binds one.
 	Wallet string
+	// Label is the label a wallet being bound is given.
+	Label string
 	// Member is the acting member.
 	Member string
 }
@@ -262,7 +264,7 @@ func (r *Register) BindWallet(p *auth.Principal, label string) (*MemberWallet, *
 		}
 		a := p.Approval
 		if a == nil || a.OpHash != hash {
-			return &StepUpRequired{Act: actBindWallet, OpHash: hash, Member: p.Sub,
+			return &StepUpRequired{Act: actBindWallet, OpHash: hash, Member: p.Sub, Label: label,
 				Summary: walletSummary("Link this wallet to your access to " + orDefault(r.pk.Title, r.pk.Name))}
 		}
 		other, err := tx.QueryOne("SELECT sub FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant) +

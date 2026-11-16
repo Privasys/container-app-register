@@ -389,7 +389,8 @@ and `.Reason`. `GET /api/v1/me` says `step_up: true` and the caller's
 The identity provider and client are set by the configure call
 (`step_up_issuer`, `step_up_client_id`, `step_up_client_secret`); with
 development sign-in, a stand-in approves everything at once and binds the
-wallet `dev-wallet:<sub>`.
+wallet `dev-wallet:<sub>`, or `dev-wallet:<sub>:<label>` when the binding
+gives a label, so a member can bind several.
 
 ## Notifications
 

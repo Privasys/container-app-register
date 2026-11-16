@@ -64,8 +64,9 @@ type Approvals interface {
 	// Begin asks the wallet bound to subject to approve an operation.
 	Begin(ctx context.Context, subject, opHash, summary string) (*PendingApproval, error)
 	// BeginBind asks whichever wallet scans the link to approve an
-	// operation, which binds it; member is for the development stand-in.
-	BeginBind(ctx context.Context, member, opHash, summary string) (*PendingApproval, error)
+	// operation, which binds it; name is for the development stand-in,
+	// which binds "dev-wallet:<name>".
+	BeginBind(ctx context.Context, name, opHash, summary string) (*PendingApproval, error)
 	// Poll returns the state of an approval, and its token once approved.
 	Poll(ctx context.Context, id string) (state, token string, err error)
 	// Verify checks an approval token.
@@ -229,7 +230,8 @@ func amrHas(claims map[string]any, want string) bool {
 
 // DevApprovals stands in for the identity provider on a laptop and in
 // tests, with the development verifier: every approval is given at once,
-// and binding binds the wallet "dev-wallet:<member>".
+// and binding binds the wallet "dev-wallet:<member>", or
+// "dev-wallet:<member>:<label>" when the binding gives a label.
 type DevApprovals struct{}
 
 // devApprovalPrefix marks a development approval token,
@@ -241,8 +243,8 @@ func (DevApprovals) Begin(_ context.Context, subject, opHash, _ string) (*Pendin
 	return devPending(subject, opHash), nil
 }
 
-func (DevApprovals) BeginBind(_ context.Context, member, opHash, _ string) (*PendingApproval, error) {
-	return devPending("dev-wallet:"+member, opHash), nil
+func (DevApprovals) BeginBind(_ context.Context, name, opHash, _ string) (*PendingApproval, error) {
+	return devPending("dev-wallet:"+name, opHash), nil
 }
 
 func devPending(wallet, opHash string) *PendingApproval {

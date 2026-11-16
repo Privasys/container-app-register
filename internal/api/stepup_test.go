@@ -88,7 +88,7 @@ func TestAnActWaitsForTheWalletOverHTTP(t *testing.T) {
 		t.Fatalf("me before binding: %v", me)
 	}
 	if status, body := approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, `{"label": "Phone"}`); status != http.StatusOK ||
-		body["wallet"].(map[string]any)["wallet"] != "dev-wallet:registrar-1" {
+		body["wallet"].(map[string]any)["wallet"] != "dev-wallet:registrar-1:Phone" {
 		t.Fatalf("bind: %d %v", status, body)
 	}
 	if _, me := stepCall(t, ts, http.MethodGet, "/api/v1/me", registrar, "", ""); me["wallet"].(map[string]any)["state"] != "bound" {
@@ -109,7 +109,7 @@ func TestAnActWaitsForTheWalletOverHTTP(t *testing.T) {
 		t.Fatalf("approved decision: %d %v", status, body)
 	}
 	approval := body["applied"].(map[string]any)["envelope"].(map[string]any)["approval"].(map[string]any)
-	if approval["wallet"] != "dev-wallet:registrar-1" || approval["op_hash"] == "" {
+	if approval["wallet"] != "dev-wallet:registrar-1:Phone" || approval["op_hash"] == "" {
 		t.Fatalf("approval recorded %v", approval)
 	}
 }
@@ -123,6 +123,9 @@ func TestMembersSeeAndRemoveTheirWalletsOverHTTP(t *testing.T) {
 	registrar := "dev:registrar-1:Registrar:register:registrar"
 	operator := "dev:operator-1:Operator:register:operator"
 	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, "")
+	// The stand-in binds a wallet of its own for each label, so a member
+	// can hold several.
+	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, `{"label": "Work phone"}`)
 	// A transport that sets no headers names the approval in the query.
 	_, asked := stepCall(t, ts, http.MethodPost, "/api/v1/me/wallets", operator, "", "")
 	id, _ := asked["approval_id"].(string)
@@ -132,14 +135,14 @@ func TestMembersSeeAndRemoveTheirWalletsOverHTTP(t *testing.T) {
 	}
 
 	status, mine := stepCall(t, ts, http.MethodGet, "/api/v1/me/wallets", registrar, "", "")
-	if status != http.StatusOK || len(mine["wallets"].([]any)) != 1 {
+	if status != http.StatusOK || len(mine["wallets"].([]any)) != 2 {
 		t.Fatalf("my wallets: %d %v", status, mine)
 	}
 	if status, _ := stepCall(t, ts, http.MethodGet, "/api/v1/wallet-bindings?member=registrar-1", registrar, "", ""); status != http.StatusForbidden {
 		t.Fatalf("a registrar listed bindings: %d", status)
 	}
 	status, list := stepCall(t, ts, http.MethodGet, "/api/v1/wallet-bindings?member=registrar-1", operator, "", "")
-	if status != http.StatusOK || len(list["wallets"].([]any)) != 1 {
+	if status != http.StatusOK || len(list["wallets"].([]any)) != 2 {
 		t.Fatalf("bindings: %d %v", status, list)
 	}
 	if status, body := stepCall(t, ts, http.MethodDelete, "/api/v1/wallet-bindings/registrar-1/dev-wallet:registrar-1?reason=Phone+lost", operator, "", ""); status != http.StatusOK {
