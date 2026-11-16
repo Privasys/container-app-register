@@ -1,7 +1,7 @@
 github.com/DataDog/zstd v1.5.7 h1:ybO8RBeh29qrxIhCA9E8gKY6xfONU9T6G6aP9DTKfLE=
 github.com/DataDog/zstd v1.5.7/go.mod h1:g4AWEaM3yOg3HYfnJ3YIawPnVdXJh9QME85blwSAmyw=
-github.com/Privasys/immutable-ledger v0.0.0-20261116171500-ff3b4f01feee h1:UMnxWcOhSdwQQxRx0X+03bKyhG5VKsZB4wxHWy/2fXE=
-github.com/Privasys/immutable-ledger v0.0.0-20261116171500-ff3b4f01feee/go.mod h1:VMI5n9ujgbinQrmBulNqvNpSk+RjtYmZighjJjA8VTw=
+github.com/Privasys/immutable-ledger v1.0.0 h1:rJlp/JRIimM/KSzdzfaJtaKD9+B7+uOxCAYNOzSJG10=
+github.com/Privasys/immutable-ledger v1.0.0/go.mod h1:VMI5n9ujgbinQrmBulNqvNpSk+RjtYmZighjJjA8VTw=
 github.com/RaduBerinde/axisds v0.1.0 h1:YItk/RmU5nvlsv/awo2Fjx97Mfpt4JfgtEVAGPrLdz8=
 github.com/RaduBerinde/axisds v0.1.0/go.mod h1:UHGJonU9z4YYGKJxSaC6/TNcLOBptpmM5m2Cksbnw0Y=
 github.com/RaduBerinde/btreemap v0.0.0-20250419174037-3d62b7205d54 h1:bsU8Tzxr/PNz75ayvCnxKZWEYdLMPDkUgticP4a4Bvk=

@@ -3,7 +3,7 @@ module github.com/Privasys/container-app-register
 go 1.27.4
 
 require (
-	github.com/Privasys/immutable-ledger v0.0.0-20261116171500-ff3b4f01feee
+	github.com/Privasys/immutable-ledger v1.0.0
 	github.com/cockroachdb/pebble/v2 v2.1.7
 	github.com/dolthub/go-mysql-server v0.20.1-0.20261113234726-552aac128b18
 )
