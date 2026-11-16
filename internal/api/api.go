@@ -204,10 +204,11 @@ func (s *Server) Handler() http.Handler {
 
 	// Step-up: approvals on the wallet bound to each member.
 	mux.HandleFunc("GET /api/v1/step-up/{id}", s.wrap(s.stepUpState))
-	mux.HandleFunc("POST /api/v1/me/wallet", s.wrap(s.bindWallet))
+	mux.HandleFunc("POST /api/v1/me/wallets", s.wrap(s.bindWallet))
+	mux.HandleFunc("GET /api/v1/me/wallets", s.wrap(s.myWallets))
+	mux.HandleFunc("DELETE /api/v1/me/wallets/{wallet}", s.wrap(s.removeMyWallet))
 	mux.HandleFunc("GET /api/v1/wallet-bindings", s.wrap(s.listWalletBindings))
-	mux.HandleFunc("POST /api/v1/wallet-bindings/{sub}/confirm", s.wrap(s.confirmWallet))
-	mux.HandleFunc("DELETE /api/v1/wallet-bindings/{sub}", s.wrap(s.unbindWallet))
+	mux.HandleFunc("DELETE /api/v1/wallet-bindings/{member}/{wallet}", s.wrap(s.removeWallet))
 
 	mux.HandleFunc("GET /api/v1/sources/{name}/{key}", s.wrap(s.describeSource))
 	mux.HandleFunc("POST /api/v1/sources/{name}/{key}/import", s.wrap(s.importFromSource))

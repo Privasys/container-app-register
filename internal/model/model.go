@@ -64,8 +64,8 @@ const (
 	KindAffiliationAdmin   = "affiliation.admin"
 	KindPackSeed           = "pack.seed"
 	KindWalletBind         = "wallet.bind"
-	KindWalletConfirm      = "wallet.confirm"
-	KindWalletUnbind       = "wallet.unbind"
+
+	KindWalletUnbind = "wallet.unbind"
 )
 
 // Ref is a typed link from a transaction to an earlier transaction or

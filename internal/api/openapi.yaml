@@ -156,39 +156,53 @@ paths:
       responses:
         "200": { description: The approval's state }
 
-  /api/v1/me/wallet:
+  /api/v1/me/wallets:
+    get:
+      tags: [Step-up]
+      summary: The caller's own wallets, the one used last first
+      responses:
+        "200": { description: OK }
     post:
       tags: [Step-up]
       summary: Bind to the caller the wallet that approves the binding (428, then again with Step-Up-Approval)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { type: object, properties: { label: { type: string, maxLength: 64 } } }
       responses:
-        "200": { description: Bound, or pending an administrator's confirmation }
+        "200": { description: Bound }
         "428": { description: Approve on the wallet; show wallet_link as a QR code when push_sent is false }
+
+  /api/v1/me/wallets/{wallet}:
+    delete:
+      tags: [Step-up]
+      summary: Remove one of the caller's own wallets
+      parameters:
+        - { name: wallet, in: path, required: true, schema: { type: string } }
+        - { name: reason, in: query, required: false, schema: { type: string } }
+      responses:
+        "200": { description: Removed }
 
   /api/v1/wallet-bindings:
     get:
       tags: [Step-up]
-      summary: The wallets bound to members
+      summary: The wallets bound to members, or to one member
+      parameters:
+        - { name: member, in: query, required: false, schema: { type: string } }
       responses:
         "200": { description: OK }
 
-  /api/v1/wallet-bindings/{sub}/confirm:
-    post:
-      tags: [Step-up]
-      summary: Confirm a member's newly bound wallet, approving on your own
-      parameters:
-        - { name: sub, in: path, required: true, schema: { type: string } }
-      responses:
-        "200": { description: Confirmed }
-
-  /api/v1/wallet-bindings/{sub}:
+  /api/v1/wallet-bindings/{member}/{wallet}:
     delete:
       tags: [Step-up]
-      summary: Unbind a member's wallet, say for a lost phone
+      summary: Remove one wallet of a member, leaving the member and their other wallets
       parameters:
-        - { name: sub, in: path, required: true, schema: { type: string } }
+        - { name: member, in: path, required: true, schema: { type: string } }
+        - { name: wallet, in: path, required: true, schema: { type: string } }
         - { name: reason, in: query, required: true, schema: { type: string } }
       responses:
-        "200": { description: Unbound }
+        "200": { description: Removed }
 
   /api/v1/invites:
     get:

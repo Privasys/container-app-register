@@ -39,6 +39,10 @@ type Notice struct {
 	ObjectID   string
 	// Key is the record's natural key, or the one the proposal names.
 	Key string
+	// Member is the name of the member a wallet event concerns, and
+	// WalletLabel the label of the wallet.
+	Member      string
+	WalletLabel string
 	// Reason is the reviewer's reason, on a rejection or a return.
 	Reason string
 	// Public holds the record's public fields, for a class that has any.
@@ -271,7 +275,7 @@ func (r *Register) RecordNotified(n Notice, sent int) (*model.Transaction, error
 			Message: composeMessage(
 				clip(fmt.Sprintf("Notified %d %s: %s %s, %s", sent, people, orDefault(n.WorkflowTitle, n.Workflow), n.Event, subject), model.MaxSummary),
 				fmt.Sprintf("Template %s, after transaction %s.", n.Template, n.TxID)),
-			Refs: []model.Ref{{Type: model.RefRelates, Target: n.TaskID}},
+			Refs: []model.Ref{{Type: model.RefRelates, Target: orDefault(n.TaskID, n.TxID)}},
 		}
 		if n.ObjectID != "" {
 			env.ObjectIDs = []string{n.ObjectID}

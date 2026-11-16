@@ -183,35 +183,51 @@ func (s *Server) approvalFor(r *http.Request, p *auth.Principal) (string, *auth.
 	return id, nil, errNotApproved
 }
 
+// bindWallet is POST /api/v1/me/wallets {label}: 428 until a wallet
+// approves, then the wallet that approved is bound to the caller.
 func (s *Server) bindWallet(req *request) (any, error) {
-	binding, txn, err := req.reg.BindWallet(req.p)
+	var in struct {
+		Label string `json:"label"`
+	}
+	if req.r.ContentLength != 0 {
+		if err := decode(req.r, &in); err != nil {
+			return nil, err
+		}
+	}
+	wallet, txn, err := req.reg.BindWallet(req.p, in.Label)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"binding": binding, "transaction": txn}, nil
+	return map[string]any{"wallet": wallet, "transaction": txn}, nil
+}
+
+func (s *Server) myWallets(req *request) (any, error) {
+	list, err := req.reg.MyWallets(req.p)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"wallets": list}, nil
+}
+
+func (s *Server) removeMyWallet(req *request) (any, error) {
+	txn, err := req.reg.RemoveMyWallet(req.p, req.r.PathValue("wallet"), req.r.URL.Query().Get("reason"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"transaction": txn}, nil
 }
 
 func (s *Server) listWalletBindings(req *request) (any, error) {
-	list, err := req.reg.WalletBindings(req.p)
+	list, err := req.reg.WalletBindings(req.p, req.r.URL.Query().Get("member"))
 	if err != nil {
 		return nil, err
 	}
-	if list == nil {
-		list = []*register.WalletBinding{}
-	}
-	return map[string]any{"bindings": list}, nil
+	return map[string]any{"wallets": list}, nil
 }
 
-func (s *Server) confirmWallet(req *request) (any, error) {
-	binding, txn, err := req.reg.ConfirmWallet(req.p, req.r.PathValue("sub"))
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"binding": binding, "transaction": txn}, nil
-}
-
-func (s *Server) unbindWallet(req *request) (any, error) {
-	txn, err := req.reg.UnbindWallet(req.p, req.r.PathValue("sub"), req.r.URL.Query().Get("reason"))
+func (s *Server) removeWallet(req *request) (any, error) {
+	txn, err := req.reg.RemoveWallet(req.p, req.r.PathValue("member"), req.r.PathValue("wallet"),
+		req.r.URL.Query().Get("reason"))
 	if err != nil {
 		return nil, err
 	}

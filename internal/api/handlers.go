@@ -316,12 +316,12 @@ func (s *Server) me(req *request) (any, error) {
 	// Whether some acts here are approved on a wallet, and whether this
 	// person has one bound, so a screen can ask them to bind it first.
 	if pk.StepUpUsed() {
-		state, err := req.reg.WalletState(req.p.Tenant, req.p.Sub)
+		state, count, err := req.reg.WalletState(req.p.Tenant, req.p.Sub)
 		if err != nil {
 			return nil, err
 		}
 		out["step_up"] = true
-		out["wallet"] = map[string]any{"state": state}
+		out["wallet"] = map[string]any{"state": state, "count": count}
 	}
 	return out, nil
 }

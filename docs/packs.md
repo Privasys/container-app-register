@@ -329,8 +329,7 @@ face. `step_up` names those acts:
   "propose": false,
   "grant_roles": ["registrar"],
   "revoke_roles": ["registrar"],
-  "erasure": true,
-  "bind_confirmation": true
+  "erasure": true
 }
 ```
 
@@ -342,8 +341,6 @@ face. `step_up` names those acts:
   invitation to them, and removing them, directly or by ending an
   appointment that confers them.
 - `erasure`: every erasure of personal data, of a record or of a profile.
-- `bind_confirmation`: a newly bound wallet waits until an administrator
-  confirms it (except the first in the register, which nobody could).
 
 **How an act is approved.** The register computes the operation: the act,
 the register, the tenant, the acting member and the request it is about to
@@ -362,15 +359,31 @@ and the approval is spent: it never admits a second act. A changed request
 (another decision, another reason) needs a fresh approval. Acting with no
 wallet bound is refused with `412` and `detail: "wallet_not_bound"`.
 
-**Binding a wallet.** `POST /api/v1/me/wallet` is approved the same way,
-by whichever wallet scans the link; the approving wallet is bound to the
-caller. A wallet serves one member and a member has one wallet.
-Administrators (`members` permission) list bindings
-(`GET /api/v1/wallet-bindings`), confirm one, approving on their own wallet
-(`POST /api/v1/wallet-bindings/{sub}/confirm`), and unbind one with a
-reason, say for a lost phone (`DELETE /api/v1/wallet-bindings/{sub}?reason=…`).
-`GET /api/v1/me` says `step_up: true` and the caller's `wallet.state`
-(`none`, `pending_confirmation`, `bound`).
+**Binding wallets.** A member binds wallets as they would register
+devices. `POST /api/v1/me/wallets` (optional `{"label": "Work phone"}`) is
+approved the same way, by whichever wallet scans the link, and binds the
+approving wallet to the caller. A member may bind several, and any of them
+approves (the one used last is asked first); a wallet serves one member.
+The member lists theirs (`GET /api/v1/me/wallets`: label, `bound_at`,
+`last_used_at`) and removes one (`DELETE /api/v1/me/wallets/{wallet}`).
+Administrators (`members` permission) list them for everyone or one member
+(`GET /api/v1/wallet-bindings?member=…`) and remove one wallet, with a
+reason, leaving the member and their other wallets as they are
+(`DELETE /api/v1/wallet-bindings/{member}/{wallet}?reason=…`), say for a
+lost phone. Each binding and removal is a transaction, and can be written
+to the member and to administrators, so a binding nobody expected is
+noticed:
+
+```json
+"notifications": [
+  { "on": "wallet:bound", "to": [{ "member": true }, { "role": "operator" }], "template": "wallet-bound" },
+  { "on": "wallet:removed", "to": [{ "member": true }], "template": "wallet-removed" }
+]
+```
+
+The templates read `.Member` (the member's name), `.WalletLabel`, `.At`
+and `.Reason`. `GET /api/v1/me` says `step_up: true` and the caller's
+`wallet` (`state`: `none` or `bound`, and `count`).
 
 The identity provider and client are set by the configure call
 (`step_up_issuer`, `step_up_client_id`, `step_up_client_secret`); with

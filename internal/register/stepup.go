@@ -6,6 +6,8 @@ package register
 import (
 	"errors"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/Privasys/container-app-register/internal/auth"
@@ -21,11 +23,15 @@ import (
 // removals of given roles, erasures). Such an act is refused with
 // StepUpRequired, which carries the operation's hash and a summary for
 // the wallet, until the request carries an approval of that same
-// operation, given on the wallet bound to the acting member. The
-// operation is computed from the request the register is about to
-// commit, so an approval of anything else (another decision, another
-// reason, a task that has moved on) does not match. The approval is
-// spent in the act's own transaction, which records it in its envelope.
+// operation, given on a wallet bound to the acting member. The operation
+// is computed from the request the register is about to commit, so an
+// approval of anything else (another decision, another reason, a task
+// that has moved on) does not match. The approval is spent in the act's
+// own transaction, which records it in its envelope.
+//
+// A member binds wallets the way they would register devices: each is a
+// row of its own, any of them approves, the member sees and removes their
+// own, and an administrator can remove one without touching the others.
 
 // StepUpRequired refuses an act until the person approves it.
 type StepUpRequired struct {
@@ -35,7 +41,8 @@ type StepUpRequired struct {
 	OpHash string
 	// Summary is the line the wallet shows.
 	Summary string
-	// Wallet is the bound wallet to ask; empty when the act binds one.
+	// Wallet is the bound wallet to ask (the one used last); empty when
+	// the act binds one.
 	Wallet string
 	// Member is the acting member.
 	Member string
@@ -50,19 +57,17 @@ func (e *StepUpRequired) Error() string {
 func (e *StepUpRequired) Bind() bool { return e.Act == actBindWallet }
 
 // ErrWalletNotBound refuses an act needing an approval from a member
-// with no wallet bound and confirmed.
+// with no wallet bound.
 var ErrWalletNotBound = errors.New("wallet_not_bound: bind a wallet before acting")
 
-// Wallet binding states.
+// Wallet states /me reports.
 const (
-	WalletNone                = "none"
-	WalletPendingConfirmation = "pending_confirmation"
-	WalletBound               = "bound"
+	WalletNone  = "none"
+	WalletBound = "bound"
 )
 
 const (
 	actBindWallet    = "bind_wallet"
-	actConfirmWallet = "confirm_wallet"
 	approvalNote     = "step_up.approval"
 	maxWalletSummary = 140
 )
@@ -92,24 +97,23 @@ func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request a
 	if err != nil {
 		return err
 	}
-	binding, err := r.walletBinding(tx, p.Tenant, p.Sub)
+	wallets, err := r.walletsOf(tx, p.Tenant, p.Sub)
 	if err != nil {
 		return err
 	}
-	switch {
-	case binding == nil:
+	if len(wallets) == 0 {
 		return ErrWalletNotBound
-	case binding.State != WalletBound:
-		return fmt.Errorf("%w: the wallet bound to you waits for an administrator to confirm it", ErrWalletNotBound)
 	}
 	a := p.Approval
 	if a == nil || a.OpHash != hash {
-		return &StepUpRequired{Act: act, OpHash: hash, Summary: walletSummary(summary), Wallet: binding.Wallet, Member: p.Sub}
+		return &StepUpRequired{Act: act, OpHash: hash, Summary: walletSummary(summary), Wallet: wallets[0].Wallet, Member: p.Sub}
 	}
-	if a.Wallet != binding.Wallet {
-		return fmt.Errorf("the approval may not be used: it was given on a wallet not bound to you")
+	for _, w := range wallets {
+		if w.Wallet == a.Wallet {
+			return r.keepApproval(tx, a)
+		}
 	}
-	return r.keepApproval(tx, a)
+	return fmt.Errorf("the approval may not be used: it was given on a wallet not bound to you")
 }
 
 func (r *Register) keepApproval(tx *store.Tx, a *auth.Approval) error {
@@ -127,14 +131,14 @@ func (r *Register) keepApproval(tx *store.Tx, a *auth.Approval) error {
 }
 
 // spendApproval records, in the transaction being committed, the
-// approval its act was admitted with.
+// approval its act was admitted with, and when the wallet was last used.
 func spendApproval(tx *store.Tx, env *model.Envelope) []model.WriteOp {
 	a, _ := tx.Detach(approvalNote).(*model.Approval)
 	if a == nil {
 		return nil
 	}
 	env.Approval = a
-	return []model.WriteOp{{
+	ops := []model.WriteOp{{
 		Table: "step_up_approvals",
 		Key:   map[string]any{"id": a.ID},
 		Values: map[string]any{
@@ -142,6 +146,14 @@ func spendApproval(tx *store.Tx, env *model.Envelope) []model.WriteOp {
 			"approved_at": a.ApprovedAt, "txid": model.TxIDPlaceholder,
 		},
 	}}
+	if env.Kind != model.KindWalletBind {
+		ops = append(ops, model.WriteOp{
+			Table:  "member_wallets",
+			Key:    map[string]any{"tenant": env.Tenant, "sub": env.Author.Sub, "wallet": a.Wallet},
+			Values: map[string]any{"last_used_at": env.Timestamp},
+		})
+	}
+	return ops
 }
 
 func walletSummary(s string) string {
@@ -152,226 +164,293 @@ func walletSummary(s string) string {
 	return s
 }
 
-// WalletBinding is the wallet a member approves their acts on.
-type WalletBinding struct {
-	Sub         string `json:"sub"`
-	Wallet      string `json:"wallet"`
-	State       string `json:"state"`
-	BoundAt     int64  `json:"bound_at"`
-	ConfirmedBy string `json:"confirmed_by,omitempty"`
-	ConfirmedAt int64  `json:"confirmed_at,omitempty"`
-	TxID        string `json:"txid"`
+// MemberWallet is one wallet bound to a member.
+type MemberWallet struct {
+	Sub        string `json:"sub"`
+	Name       string `json:"name,omitempty"`
+	Wallet     string `json:"wallet"`
+	Label      string `json:"label,omitempty"`
+	BoundAt    int64  `json:"bound_at"`
+	LastUsedAt int64  `json:"last_used_at,omitempty"`
+	TxID       string `json:"txid"`
 }
 
-func bindingID(tenant, sub string) string { return tenant + "|" + sub }
-
-func decodeBinding(row store.Row) *WalletBinding {
-	return &WalletBinding{
-		Sub: row.Str("sub"), Wallet: row.Str("wallet"), State: row.Str("state"),
-		BoundAt: row.Int("bound_at"), ConfirmedBy: row.Str("confirmed_by"),
-		ConfirmedAt: row.Int("confirmed_at"), TxID: row.Str("txid"),
+func decodeWallet(row store.Row) *MemberWallet {
+	return &MemberWallet{
+		Sub: row.Str("sub"), Wallet: row.Str("wallet"), Label: row.Str("label"),
+		BoundAt: row.Int("bound_at"), LastUsedAt: row.Int("last_used_at"), TxID: row.Str("txid"),
 	}
 }
 
-func (r *Register) walletBinding(tx *store.Tx, tenant, sub string) (*WalletBinding, error) {
-	row, err := tx.QueryOne("SELECT * FROM `wallet_bindings` WHERE id = " + store.Lit(bindingID(tenant, sub)))
-	if err != nil || row == nil {
+// walletsOf lists a member's wallets, the one used last first.
+func (r *Register) walletsOf(tx *store.Tx, tenant, sub string) ([]*MemberWallet, error) {
+	rows, err := tx.Query("SELECT * FROM `member_wallets` WHERE tenant = " + store.Lit(tenant) +
+		" AND sub = " + store.Lit(sub))
+	if err != nil {
 		return nil, err
 	}
-	return decodeBinding(row), nil
+	out := make([]*MemberWallet, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, decodeWallet(row))
+	}
+	last := func(w *MemberWallet) int64 { return max(w.LastUsedAt, w.BoundAt) }
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && last(out[j]) > last(out[j-1]); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out, nil
 }
 
-// WalletState says whether a member has a wallet bound: none,
-// pending_confirmation or bound.
-func (r *Register) WalletState(tenant, sub string) (string, error) {
-	state := WalletNone
+// WalletState says whether a member has a wallet bound, and how many.
+func (r *Register) WalletState(tenant, sub string) (string, int, error) {
+	var n int
 	err := r.st.Do(func(tx *store.Tx) error {
-		b, err := r.walletBinding(tx, tenant, sub)
-		if b != nil {
-			state = b.State
-		}
+		list, err := r.walletsOf(tx, tenant, sub)
+		n = len(list)
 		return err
 	})
-	return state, err
+	if n == 0 {
+		return WalletNone, 0, err
+	}
+	return WalletBound, n, err
 }
 
 // BindWallet binds to the caller the wallet that approves the binding.
 // The first call is refused with StepUpRequired, which the identity
 // provider turns into a link for the wallet to scan; the call made again
-// with that approval binds the wallet whose subject it names. When the
-// pack asks for confirmation, the binding then waits for an
-// administrator, except the first in the register, which nobody could
-// confirm.
-func (r *Register) BindWallet(p *auth.Principal) (*WalletBinding, *model.Transaction, error) {
+// with that approval binds the wallet whose subject it names. A member
+// may bind several; a wallet serves one member. The label is the
+// member's name for it ("work phone").
+func (r *Register) BindWallet(p *auth.Principal, label string) (*MemberWallet, *model.Transaction, error) {
 	if !r.pk.StepUpUsed() {
 		return nil, nil, fmt.Errorf("this register asks for no approvals, so binds no wallets")
 	}
+	label = strings.TrimSpace(label)
+	if len([]rune(label)) > 64 {
+		return nil, nil, fmt.Errorf("a wallet's label is at most 64 characters")
+	}
 	var (
-		out *WalletBinding
+		out *MemberWallet
 		txn *model.Transaction
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
-		held, err := r.walletBinding(tx, p.Tenant, p.Sub)
-		if err != nil {
-			return err
-		}
-		if held != nil {
-			return fmt.Errorf("a wallet is already bound to you; an administrator must unbind it first")
-		}
-		hash, err := r.operationHash(p, actBindWallet, map[string]any{})
+		hash, err := r.operationHash(p, actBindWallet, map[string]any{"label": label})
 		if err != nil {
 			return err
 		}
 		a := p.Approval
 		if a == nil || a.OpHash != hash {
 			return &StepUpRequired{Act: actBindWallet, OpHash: hash, Member: p.Sub,
-				Summary: walletSummary("Link your wallet to " + orDefault(r.pk.Title, r.pk.Name))}
+				Summary: walletSummary("Link this wallet to your access to " + orDefault(r.pk.Title, r.pk.Name))}
 		}
-		other, err := tx.QueryOne("SELECT sub FROM `wallet_bindings` WHERE tenant = " + store.Lit(p.Tenant) +
+		other, err := tx.QueryOne("SELECT sub FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant) +
 			" AND wallet = " + store.Lit(a.Wallet))
 		if err != nil {
 			return err
 		}
 		if other != nil {
+			if other.Str("sub") == p.Sub {
+				return fmt.Errorf("this wallet is already bound to you")
+			}
 			return fmt.Errorf("this wallet is already bound to another member")
 		}
 		if err := r.keepApproval(tx, a); err != nil {
 			return err
 		}
-		state := WalletBound
-		if r.pk.StepUpBindConfirmation() {
-			any, err := tx.QueryOne("SELECT id FROM `wallet_bindings` WHERE tenant = " + store.Lit(p.Tenant) +
-				" AND state = " + store.Lit(WalletBound) + " LIMIT 1")
-			if err != nil {
-				return err
-			}
-			if any != nil {
-				state = WalletPendingConfirmation
-			}
-		}
 		at := r.now()
-		body := "The wallet now approves this member's acts."
-		if state == WalletPendingConfirmation {
-			body = "The wallet will approve this member's acts once an administrator confirms it."
-		}
 		txn, err = r.commit(tx, model.Envelope{
 			Kind: model.KindWalletBind, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,
-			Message: composeMessage(clip("Bind a wallet to "+clip(p.Sub, 16), model.MaxSummary), body),
+			Message: composeMessage(clip("Bind a wallet to "+clip(p.Sub, 16), model.MaxSummary),
+				strings.TrimSpace("The wallet approves this member's acts from now on. "+label)),
 		}, []model.WriteOp{{
-			Table: "wallet_bindings",
-			Key:   map[string]any{"id": bindingID(p.Tenant, p.Sub)},
+			Table: "member_wallets",
+			Key:   map[string]any{"tenant": p.Tenant, "sub": p.Sub, "wallet": a.Wallet},
 			Values: map[string]any{
-				"tenant": p.Tenant, "sub": p.Sub, "wallet": a.Wallet, "state": state, "bound_at": at,
-				"confirmed_by": "", "confirmed_at": int64(0), "txid": model.TxIDPlaceholder,
+				"label": label, "bound_at": at, "last_used_at": int64(0), "txid": model.TxIDPlaceholder,
 			},
 		}})
 		if err != nil {
 			return err
 		}
-		out, err = r.walletBinding(tx, p.Tenant, p.Sub)
+		row, err := tx.QueryOne("SELECT * FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant) +
+			" AND sub = " + store.Lit(p.Sub) + " AND wallet = " + store.Lit(a.Wallet))
+		if err == nil && row != nil {
+			out = decodeWallet(row)
+		}
 		return err
 	})
+	if err == nil {
+		r.emitWallet(pack.EventWalletBound, p.Tenant, p.Sub, out, txn, "")
+	}
 	return out, txn, err
 }
 
-// ConfirmWallet confirms a member's newly bound wallet. The confirming
-// administrator approves the confirmation on their own wallet, and may
-// not confirm their own.
-func (r *Register) ConfirmWallet(p *auth.Principal, sub string) (*WalletBinding, *model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
-		return nil, nil, fmt.Errorf("%s may not manage members", p.Acting)
-	}
-	if sub == p.Sub {
-		return nil, nil, fmt.Errorf("separation of duties: a member may not confirm their own wallet")
-	}
-	var (
-		out *WalletBinding
-		txn *model.Transaction
-	)
+// MyWallets lists the caller's own wallets.
+func (r *Register) MyWallets(p *auth.Principal) ([]*MemberWallet, error) {
+	var out []*MemberWallet
 	err := r.st.Do(func(tx *store.Tx) error {
-		b, err := r.walletBinding(tx, p.Tenant, sub)
-		if err != nil {
-			return err
-		}
-		if b == nil {
-			return fmt.Errorf("no such binding: no wallet is bound to %s", clip(sub, 24))
-		}
-		if b.State != WalletPendingConfirmation {
-			return fmt.Errorf("the wallet of %s is not awaiting confirmation", clip(sub, 24))
-		}
-		if err := r.stepUp(tx, p, actConfirmWallet, map[string]any{"sub": sub, "wallet": b.Wallet},
-			"Confirm the wallet bound to "+r.personName(tx, sub)); err != nil {
-			return err
-		}
-		at := r.now()
-		txn, err = r.commit(tx, model.Envelope{
-			Kind: model.KindWalletConfirm, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,
-			Message: composeMessage(clip("Confirm the wallet of "+clip(sub, 16), model.MaxSummary),
-				"The wallet now approves this member's acts."),
-		}, []model.WriteOp{{
-			Table: "wallet_bindings",
-			Key:   map[string]any{"id": bindingID(p.Tenant, sub)},
-			Values: map[string]any{
-				"tenant": p.Tenant, "sub": sub, "wallet": b.Wallet, "state": WalletBound, "bound_at": b.BoundAt,
-				"confirmed_by": p.Sub, "confirmed_at": at, "txid": model.TxIDPlaceholder,
-			},
-		}})
-		if err != nil {
-			return err
-		}
-		out, err = r.walletBinding(tx, p.Tenant, sub)
-		return err
-	})
-	return out, txn, err
-}
-
-// UnbindWallet removes a member's wallet, say when a phone is lost; the
-// member binds another. It needs a reason, recorded with it.
-func (r *Register) UnbindWallet(p *auth.Principal, sub, reason string) (*model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
-	}
-	if strings.TrimSpace(reason) == "" {
-		return nil, fmt.Errorf("say why the wallet is unbound")
-	}
-	var txn *model.Transaction
-	err := r.st.Do(func(tx *store.Tx) error {
-		b, err := r.walletBinding(tx, p.Tenant, sub)
-		if err != nil {
-			return err
-		}
-		if b == nil {
-			return fmt.Errorf("no such binding: no wallet is bound to %s", clip(sub, 24))
-		}
-		txn, err = r.commit(tx, model.Envelope{
-			Kind: model.KindWalletUnbind, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: r.now(),
-			Message: composeMessage(clip("Unbind the wallet of "+clip(sub, 16), model.MaxSummary), reason),
-		}, []model.WriteOp{{
-			Table: "wallet_bindings", Key: map[string]any{"id": bindingID(p.Tenant, sub)}, Delete: true,
-		}})
-		return err
-	})
-	return txn, err
-}
-
-// WalletBindings lists the wallets bound to members.
-func (r *Register) WalletBindings(p *auth.Principal) ([]*WalletBinding, error) {
-	if !p.Can(auth.PermMembers) {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
-	}
-	var out []*WalletBinding
-	err := r.st.Do(func(tx *store.Tx) error {
-		rows, err := tx.Query("SELECT * FROM `wallet_bindings` WHERE tenant = " + store.Lit(p.Tenant) + " ORDER BY sub")
-		for _, row := range rows {
-			out = append(out, decodeBinding(row))
-		}
+		var err error
+		out, err = r.walletsOf(tx, p.Tenant, p.Sub)
 		return err
 	})
 	return out, err
 }
 
-// personName is how a wallet summary names a person: their recorded
-// name, else a shortened subject.
+// RemoveMyWallet unbinds one of the caller's own wallets.
+func (r *Register) RemoveMyWallet(p *auth.Principal, wallet, reason string) (*model.Transaction, error) {
+	return r.removeWallet(p, p.Sub, wallet, reason)
+}
+
+// RemoveWallet unbinds one wallet of a member, say for a lost phone,
+// leaving the member and their other wallets as they are. Whoever
+// manages members may, and says why.
+func (r *Register) RemoveWallet(p *auth.Principal, member, wallet, reason string) (*model.Transaction, error) {
+	if !p.Can(auth.PermMembers) {
+		return nil, fmt.Errorf("%s may not manage members", p.Acting)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("say why the wallet is removed")
+	}
+	return r.removeWallet(p, member, wallet, reason)
+}
+
+func (r *Register) removeWallet(p *auth.Principal, member, wallet, reason string) (*model.Transaction, error) {
+	var (
+		txn *model.Transaction
+		w   *MemberWallet
+	)
+	err := r.st.Do(func(tx *store.Tx) error {
+		row, err := tx.QueryOne("SELECT * FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant) +
+			" AND sub = " + store.Lit(member) + " AND wallet = " + store.Lit(wallet))
+		if err != nil {
+			return err
+		}
+		if row == nil {
+			return fmt.Errorf("no such wallet: it is not bound to %s", clip(member, 24))
+		}
+		w = decodeWallet(row)
+		summary := "Remove a wallet of " + clip(member, 16)
+		if member == p.Sub {
+			summary = "Remove one of my wallets"
+		}
+		txn, err = r.commit(tx, model.Envelope{
+			Kind: model.KindWalletUnbind, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: r.now(),
+			Message: composeMessage(clip(summary, model.MaxSummary),
+				strings.TrimSpace(orDefault(strings.TrimSpace(reason), "The member removed it.")+" "+w.Label)),
+		}, []model.WriteOp{{
+			Table: "member_wallets", Delete: true,
+			Key: map[string]any{"tenant": p.Tenant, "sub": member, "wallet": wallet},
+		}})
+		return err
+	})
+	if err == nil {
+		r.emitWallet(pack.EventWalletRemoved, p.Tenant, member, w, txn, reason)
+	}
+	return txn, err
+}
+
+// WalletBindings lists the wallets bound to members, or to one member,
+// each with the member's name.
+func (r *Register) WalletBindings(p *auth.Principal, member string) ([]*MemberWallet, error) {
+	if !p.Can(auth.PermMembers) {
+		return nil, fmt.Errorf("%s may not manage members", p.Acting)
+	}
+	out := []*MemberWallet{}
+	err := r.st.Do(func(tx *store.Tx) error {
+		q := "SELECT * FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant)
+		if member != "" {
+			q += " AND sub = " + store.Lit(member)
+		}
+		rows, err := tx.Query(q + " ORDER BY sub, bound_at")
+		if err != nil {
+			return err
+		}
+		names := map[string]string{}
+		for _, row := range rows {
+			w := decodeWallet(row)
+			if _, ok := names[w.Sub]; !ok {
+				names[w.Sub] = ""
+				if prof, err := r.profileIn(tx, w.Sub); err == nil {
+					names[w.Sub] = prof.Name
+				}
+			}
+			w.Name = names[w.Sub]
+			out = append(out, w)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// emitWallet resolves and hands on the notices that follow a wallet
+// being bound or removed, so a binding nobody expected is noticed.
+func (r *Register) emitWallet(event, tenant, member string, w *MemberWallet, txn *model.Transaction, reason string) {
+	if r.notices == nil || txn == nil {
+		return
+	}
+	rules := r.pk.NotificationsOn(pack.WalletEvents, event)
+	if len(rules) == 0 {
+		return
+	}
+	var notices []Notice
+	err := r.st.Do(func(tx *store.Tx) error {
+		for _, n := range rules {
+			out := Notice{
+				Template: n.Template, Workflow: pack.WalletEvents, Event: event, TxID: txn.TxID,
+				At: txn.Envelope.Timestamp, Reason: reason, Member: r.personName(tx, member),
+			}
+			if w != nil {
+				out.WalletLabel = w.Label
+			}
+			subs := []string{}
+			add := func(sub string) {
+				if sub != "" && !strings.HasPrefix(sub, "system:") && !containsString(subs, sub) {
+					subs = append(subs, sub)
+				}
+			}
+			for _, rule := range n.To {
+				switch {
+				case rule.Member:
+					add(member)
+				case rule.Role != "":
+					holders, err := r.holdersOf(tx, tenant, rule.Role)
+					if err != nil {
+						return err
+					}
+					for _, sub := range holders {
+						add(sub)
+					}
+				}
+			}
+			sort.Strings(subs)
+			for _, sub := range subs {
+				profile, err := r.profileIn(tx, sub)
+				if err != nil {
+					return err
+				}
+				if profile.Email == "" || profile.Erased {
+					continue
+				}
+				out.Recipients = append(out.Recipients, NoticeRecipient{Sub: sub, Name: profile.Name, Email: profile.Email})
+			}
+			if len(out.Recipients) > 0 {
+				notices = append(notices, out)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("notifications: recipients not resolved", "event", "wallet:"+event, "error", err)
+		return
+	}
+	for _, n := range notices {
+		r.notices.Deliver(n)
+	}
+}
+
+// personName is how a summary names a person: their recorded name, else
+// a shortened subject.
 func (r *Register) personName(tx *store.Tx, sub string) string {
 	if prof, err := r.profileIn(tx, sub); err == nil && prof.Name != "" {
 		return prof.Name

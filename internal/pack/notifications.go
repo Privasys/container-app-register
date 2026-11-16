@@ -9,12 +9,13 @@ import (
 	"strings"
 )
 
-// Notification writes to people when a workflow event happens: a
-// proposal is made, approved (by a reviewer or under policy), rejected,
-// or returned for more information. The site's email template names what
-// the message says; the pack names who receives it.
+// Notification writes to people when a workflow event happens (a
+// proposal is made, approved by a reviewer or under policy, rejected, or
+// returned for more information) or a wallet is bound to a member or
+// removed. The site's email template names what the message says; the
+// pack names who receives it.
 type Notification struct {
-	// On is "<workflow>:<event>".
+	// On is "<workflow>:<event>", or "wallet:bound" or "wallet:removed".
 	On string `json:"on"`
 	// To are the rules that choose recipients, resolved when the event
 	// is committed.
@@ -24,12 +25,15 @@ type Notification struct {
 }
 
 // NotifyRule chooses recipients: everyone holding a role whose scope
-// admits the record, everyone in the proposer's organisation, or the
-// proposer. A rule sets exactly one of them.
+// admits the record, everyone in the proposer's organisation, the
+// proposer, or the member a wallet event concerns. A rule sets exactly
+// one of them.
 type NotifyRule struct {
 	Role                 string `json:"role,omitempty"`
 	ProposerOrganisation bool   `json:"proposer_organisation,omitempty"`
 	Proposer             bool   `json:"proposer,omitempty"`
+	// Member is the member a wallet event concerns.
+	Member bool `json:"member,omitempty"`
 }
 
 // The workflow events a notification can follow.
@@ -38,10 +42,17 @@ const (
 	EventApproved = "approved"
 	EventRejected = "rejected"
 	EventReturned = "returned"
+
+	// WalletEvents prefixes the events of wallet bindings: "wallet:bound"
+	// when a member binds a wallet, "wallet:removed" when one is removed.
+	WalletEvents       = "wallet"
+	EventWalletBound   = "bound"
+	EventWalletRemoved = "removed"
 )
 
 var (
 	notifyEvents   = []string{EventProposed, EventApproved, EventRejected, EventReturned}
+	walletEvents   = []string{EventWalletBound, EventWalletRemoved}
 	templateNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 )
 
@@ -54,10 +65,15 @@ func (n *Notification) Event() (workflow, event string) {
 func (p *Pack) validateNotifications() error {
 	for i, n := range p.Notifications {
 		wf, event := n.Event()
-		if p.workflowByName[wf] == nil {
+		wallet := wf == WalletEvents
+		switch {
+		case wallet:
+			if !contains(walletEvents, event) {
+				return fmt.Errorf("notification %d: %q is not a wallet event (%s)", i, event, strings.Join(walletEvents, ", "))
+			}
+		case p.workflowByName[wf] == nil:
 			return fmt.Errorf("notification %d: no workflow named %q", i, wf)
-		}
-		if !contains(notifyEvents, event) {
+		case !contains(notifyEvents, event):
 			return fmt.Errorf("notification %d: %q is not an event (%s)", i, event, strings.Join(notifyEvents, ", "))
 		}
 		if !templateNameRe.MatchString(n.Template) {
@@ -83,8 +99,17 @@ func (p *Pack) validateNotifications() error {
 			if rule.Proposer {
 				set++
 			}
+			if rule.Member {
+				set++
+			}
 			if set != 1 {
-				return fmt.Errorf("notification %d, recipient %d: set exactly one of role, proposer_organisation and proposer", i, j)
+				return fmt.Errorf("notification %d, recipient %d: set exactly one of role, proposer_organisation, proposer and member", i, j)
+			}
+			if wallet && (rule.Proposer || rule.ProposerOrganisation) {
+				return fmt.Errorf("notification %d, recipient %d: a wallet event has no proposer; name the member or a role", i, j)
+			}
+			if !wallet && rule.Member {
+				return fmt.Errorf("notification %d, recipient %d: member applies to wallet events", i, j)
 			}
 		}
 	}

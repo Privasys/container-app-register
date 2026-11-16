@@ -176,7 +176,7 @@ var pkColumns = map[string][]string{
 	"organisation_roles":   {"tenant", "organisation", "role"},
 	"invite_appointments":  {"id"},
 	"appointment_holders":  {"tenant", "class", "natural_key"},
-	"wallet_bindings":      {"id"},
+	"member_wallets":       {"tenant", "sub", "wallet"},
 	"step_up_approvals":    {"id"},
 	"registry":             {"k"},
 }

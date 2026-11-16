@@ -109,7 +109,7 @@ func (n *NoticeSender) data(mailer NoticeMailer, notice register.Notice, to regi
 		"Workflow": notice.Workflow, "WorkflowTitle": notice.WorkflowTitle, "Event": notice.Event,
 		"Class": notice.Class, "ClassTitle": notice.ClassTitle, "Key": notice.Key,
 		"TaskID": notice.TaskID, "Reason": notice.Reason, "RecipientName": to.Name,
-		"Public": notice.Public, "RecordURL": "",
+		"Public": notice.Public, "RecordURL": "", "Member": notice.Member, "WalletLabel": notice.WalletLabel,
 	}
 	if notice.At != 0 {
 		out["At"] = time.Unix(notice.At, 0).UTC().Format(time.RFC3339)

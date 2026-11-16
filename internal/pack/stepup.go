@@ -15,8 +15,7 @@ import "fmt"
 //	  "decisions": ["approve", "reject", "return"],
 //	  "grant_roles": ["registrar", "auditor"],
 //	  "revoke_roles": ["registrar", "auditor"],
-//	  "erasure": true,
-//	  "bind_confirmation": true
+//	  "erasure": true
 //	}
 type StepUp struct {
 	// Workflows whose decisions need an approval.
@@ -34,9 +33,6 @@ type StepUp struct {
 	RevokeRoles []string `json:"revoke_roles,omitempty"`
 	// Erasure makes every erasure of personal data need one.
 	Erasure bool `json:"erasure,omitempty"`
-	// BindConfirmation holds a newly bound wallet until an administrator,
-	// approving on their own wallet, confirms it.
-	BindConfirmation bool `json:"bind_confirmation,omitempty"`
 }
 
 // Decisions a step-up can name.
@@ -107,9 +103,3 @@ func (p *Pack) StepUpRevoke(role string) bool {
 
 // StepUpErasure reports whether an erasure needs one.
 func (p *Pack) StepUpErasure() bool { return p.StepUp != nil && p.StepUp.Erasure }
-
-// StepUpBindConfirmation reports whether a bound wallet waits for an
-// administrator.
-func (p *Pack) StepUpBindConfirmation() bool {
-	return p.StepUp != nil && p.StepUp.BindConfirmation
-}

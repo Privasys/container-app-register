@@ -351,23 +351,22 @@ var baseTables = []tableDDL{
 		},
 	},
 	{
-		// The wallet each member approves their acts on. A member has one;
-		// a wallet serves one member. Pending until an administrator
-		// confirms it, when the pack asks for that.
-		name: "wallet_bindings",
-		ddl: `CREATE TABLE ` + "`wallet_bindings`" + ` (
-			id VARCHAR(400) PRIMARY KEY,
+		// The wallets each member approves their acts on, one row each,
+		// like devices: a member may bind several, and any of them
+		// approves. A wallet serves one member.
+		name: "member_wallets",
+		ddl: `CREATE TABLE ` + "`member_wallets`" + ` (
 			tenant VARCHAR(64) NOT NULL,
 			sub VARCHAR(256) NOT NULL,
 			wallet VARCHAR(256) NOT NULL,
-			state VARCHAR(24) NOT NULL,
+			label VARCHAR(64) NOT NULL,
 			bound_at BIGINT NOT NULL,
-			confirmed_by VARCHAR(256) NOT NULL,
-			confirmed_at BIGINT NOT NULL,
-			txid CHAR(64) NOT NULL
+			last_used_at BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL,
+			PRIMARY KEY (tenant, sub, wallet)
 		)`,
 		indexes: []string{
-			"CREATE INDEX `wallet_bindings_wallet` ON `wallet_bindings` (tenant, wallet)",
+			"CREATE INDEX `member_wallets_wallet` ON `member_wallets` (tenant, wallet)",
 		},
 	},
 	{

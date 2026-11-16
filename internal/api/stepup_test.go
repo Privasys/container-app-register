@@ -87,8 +87,8 @@ func TestAnActWaitsForTheWalletOverHTTP(t *testing.T) {
 		me["wallet"].(map[string]any)["state"] != "none" {
 		t.Fatalf("me before binding: %v", me)
 	}
-	if status, body := approve(t, ts, http.MethodPost, "/api/v1/me/wallet", registrar, ""); status != http.StatusOK ||
-		body["binding"].(map[string]any)["wallet"] != "dev-wallet:registrar-1" {
+	if status, body := approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, `{"label": "Phone"}`); status != http.StatusOK ||
+		body["wallet"].(map[string]any)["wallet"] != "dev-wallet:registrar-1" {
 		t.Fatalf("bind: %d %v", status, body)
 	}
 	if _, me := stepCall(t, ts, http.MethodGet, "/api/v1/me", registrar, "", ""); me["wallet"].(map[string]any)["state"] != "bound" {
@@ -111,5 +111,38 @@ func TestAnActWaitsForTheWalletOverHTTP(t *testing.T) {
 	approval := body["applied"].(map[string]any)["envelope"].(map[string]any)["approval"].(map[string]any)
 	if approval["wallet"] != "dev-wallet:registrar-1" || approval["op_hash"] == "" {
 		t.Fatalf("approval recorded %v", approval)
+	}
+}
+
+func TestMembersSeeAndRemoveTheirWalletsOverHTTP(t *testing.T) {
+	ts, srv, reg := newTestServerWith(t, func(doc map[string]any) {
+		doc["step_up"] = map[string]any{"grant_roles": []any{"registrar"}}
+	})
+	srv.Ready(reg, auth.DevVerifier{})
+	srv.Approvals.Store(&ApprovalService{Approvals: auth.DevApprovals{}})
+	registrar := "dev:registrar-1:Registrar:register:registrar"
+	operator := "dev:operator-1:Operator:register:operator"
+	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", registrar, "")
+	approve(t, ts, http.MethodPost, "/api/v1/me/wallets", operator, "")
+
+	status, mine := stepCall(t, ts, http.MethodGet, "/api/v1/me/wallets", registrar, "", "")
+	if status != http.StatusOK || len(mine["wallets"].([]any)) != 1 {
+		t.Fatalf("my wallets: %d %v", status, mine)
+	}
+	if status, _ := stepCall(t, ts, http.MethodGet, "/api/v1/wallet-bindings?member=registrar-1", registrar, "", ""); status != http.StatusForbidden {
+		t.Fatalf("a registrar listed bindings: %d", status)
+	}
+	status, list := stepCall(t, ts, http.MethodGet, "/api/v1/wallet-bindings?member=registrar-1", operator, "", "")
+	if status != http.StatusOK || len(list["wallets"].([]any)) != 1 {
+		t.Fatalf("bindings: %d %v", status, list)
+	}
+	if status, body := stepCall(t, ts, http.MethodDelete, "/api/v1/wallet-bindings/registrar-1/dev-wallet:registrar-1?reason=Phone+lost", operator, "", ""); status != http.StatusOK {
+		t.Fatalf("remove: %d %v", status, body)
+	}
+	if status, body := stepCall(t, ts, http.MethodDelete, "/api/v1/me/wallets/dev-wallet:operator-1", operator, "", ""); status != http.StatusOK {
+		t.Fatalf("remove my own: %d %v", status, body)
+	}
+	if _, me := stepCall(t, ts, http.MethodGet, "/api/v1/me", operator, "", ""); me["wallet"].(map[string]any)["state"] != "none" {
+		t.Fatalf("me %v", me)
 	}
 }
