@@ -219,7 +219,11 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 		}
 	}
 
-	// An act admitted with an approval spends it here, in its own commit.
+	// An act that needs an approval is admitted here, after its own
+	// checks, and spends the approval in its own commit.
+	if err := r.admitStepUp(tx); err != nil {
+		return nil, err
+	}
 	ops = append(ops, spendApproval(tx, &env)...)
 
 	txid, err := transactionID(env, ops)

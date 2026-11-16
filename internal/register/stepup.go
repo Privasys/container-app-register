@@ -69,6 +69,7 @@ const (
 const (
 	actBindWallet    = "bind_wallet"
 	approvalNote     = "step_up.approval"
+	stepUpNote       = "step_up.pending"
 	maxWalletSummary = 140
 )
 
@@ -89,14 +90,35 @@ func (r *Register) operationHash(p *auth.Principal, act string, request any) (st
 	return auth.OperationHash(raw), nil
 }
 
-// stepUp admits an act that needs an approval, and keeps the approval
-// with the transaction, for commit to record and spend. Called inside
-// the act's store transaction, after its own checks.
+// stepUp says the act being carried out needs an approval of this
+// operation. Nothing is checked yet: the act runs every check of its own
+// first, and the approval is asked for, or admitted, only when the act
+// is about to be committed (see admitStepUp), so nobody approves on
+// their phone an act that would be refused anyway, and a refusal never
+// depends on whether a wallet is bound.
 func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request any, summary string) error {
 	hash, err := r.operationHash(p, act, request)
 	if err != nil {
 		return err
 	}
+	tx.Attach(stepUpNote, &pendingStepUp{p: p, act: act, hash: hash, summary: walletSummary(summary)})
+	return nil
+}
+
+type pendingStepUp struct {
+	p                  *auth.Principal
+	act, hash, summary string
+}
+
+// admitStepUp runs at commit, after the act's own checks: an act that
+// needs an approval goes ahead only with one of this very operation,
+// given on a wallet bound to the member, and not spent before.
+func (r *Register) admitStepUp(tx *store.Tx) error {
+	need, _ := tx.Detach(stepUpNote).(*pendingStepUp)
+	if need == nil {
+		return nil
+	}
+	p := need.p
 	wallets, err := r.walletsOf(tx, p.Tenant, p.Sub)
 	if err != nil {
 		return err
@@ -105,8 +127,8 @@ func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request a
 		return ErrWalletNotBound
 	}
 	a := p.Approval
-	if a == nil || a.OpHash != hash {
-		return &StepUpRequired{Act: act, OpHash: hash, Summary: walletSummary(summary), Wallet: wallets[0].Wallet, Member: p.Sub}
+	if a == nil || a.OpHash != need.hash {
+		return &StepUpRequired{Act: need.act, OpHash: need.hash, Summary: need.summary, Wallet: wallets[0].Wallet, Member: p.Sub}
 	}
 	for _, w := range wallets {
 		if w.Wallet == a.Wallet {
@@ -115,7 +137,6 @@ func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request a
 	}
 	return fmt.Errorf("the approval may not be used: it was given on a wallet not bound to you")
 }
-
 func (r *Register) keepApproval(tx *store.Tx, a *auth.Approval) error {
 	spent, err := tx.QueryOne("SELECT id FROM `step_up_approvals` WHERE id = " + store.Lit(a.ID))
 	if err != nil {

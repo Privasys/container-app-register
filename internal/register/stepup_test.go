@@ -92,6 +92,23 @@ func TestADecisionWaitsForTheApproversWallet(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.tick()
+	// An act refused on its merits is refused as before: nobody is asked
+	// to approve, on a wallet or not, what would not be committed.
+	notAsked := func(what string, err error) {
+		t.Helper()
+		var need *register.StepUpRequired
+		if err == nil || errors.Is(err, register.ErrWalletNotBound) || errors.As(err, &need) {
+			t.Fatalf("%s: expected its own refusal, got %v", what, err)
+		}
+	}
+	_, err = h.reg.Decide(clerk, out.Task.ID, register.Decision{Approve: true})
+	notAsked("a clerk's decision", err)
+	_, err = h.reg.GrantRole(clerk, "sub-ana", "registrar", "", "")
+	notAsked("a clerk's grant", err)
+	_, _, err = h.reg.Invite(clerk, register.InviteRequest{Role: "registrar"})
+	notAsked("a clerk's invitation", err)
+	_, err = h.reg.RevokeRole(h.principal("operator-1", "operator"), "nobody", "registrar", "")
+	notAsked("revoking a role nobody holds", err)
 	if _, err := h.reg.Decide(registrar, out.Task.ID, register.Decision{Approve: true}); !errors.Is(err, register.ErrWalletNotBound) {
 		t.Fatalf("a registrar with no wallet decided: %v", err)
 	}
