@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 
@@ -37,15 +38,16 @@ import (
 type StepUpRequired struct {
 	// Act names the kind of act.
 	Act string
-	// OpHash is the hash of the operation to approve.
+	// OpHash is the digest of the act to approve.
 	OpHash string
-	// Summary is the line the wallet shows.
+	// Summary is the title the wallet shows, and Lines what it shows
+	// under it.
 	Summary string
-	// Wallet is the bound wallet to ask (the one used last); empty when
-	// the act binds one.
+	Lines   []auth.ApprovalLine
+	// Assurance is how the person must approve.
+	Assurance string
+	// Wallet is the bound wallet to ask: the one used last.
 	Wallet string
-	// Label is the label a wallet being bound is given.
-	Label string
 	// Member is the acting member.
 	Member string
 }
@@ -53,10 +55,6 @@ type StepUpRequired struct {
 func (e *StepUpRequired) Error() string {
 	return "step_up_required: approve this on your wallet: " + e.Summary
 }
-
-// Bind reports whether the approval binds a wallet, so goes to whoever
-// scans the link rather than to a bound wallet.
-func (e *StepUpRequired) Bind() bool { return e.Act == actBindWallet }
 
 // ErrWalletNotBound refuses an act needing an approval from a member
 // with no wallet bound.
@@ -69,10 +67,9 @@ const (
 )
 
 const (
-	actBindWallet    = "bind_wallet"
 	approvalNote     = "step_up.approval"
 	stepUpNote       = "step_up.pending"
-	maxWalletSummary = 140
+	maxWalletSummary = 120
 )
 
 // operation is what a person approves. Its canonical form is hashed.
@@ -93,28 +90,32 @@ func (r *Register) operationHash(p *auth.Principal, act string, request any) (st
 }
 
 // stepUp says the act being carried out needs an approval of this
-// operation. Nothing is checked yet: the act runs every check of its own
-// first, and the approval is asked for, or admitted, only when the act
-// is about to be committed (see admitStepUp), so nobody approves on
-// their phone an act that would be refused anyway, and a refusal never
-// depends on whether a wallet is bound.
-func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request any, summary string) error {
+// operation, shown on the wallet as summary and lines. Nothing is
+// checked yet: the act runs every check of its own first, and the
+// approval is asked for, or admitted, only when the act is about to be
+// committed (see admitStepUp), so nobody approves on their phone an act
+// that would be refused anyway, and a refusal never depends on whether a
+// wallet is bound.
+func (r *Register) stepUp(tx *store.Tx, p *auth.Principal, act string, request any, summary string, lines ...auth.ApprovalLine) error {
 	hash, err := r.operationHash(p, act, request)
 	if err != nil {
 		return err
 	}
-	tx.Attach(stepUpNote, &pendingStepUp{p: p, act: act, hash: hash, summary: walletSummary(summary)})
+	shown := append([]auth.ApprovalLine{{Label: "Register", Value: orDefault(r.pk.Title, r.pk.Name)}}, lines...)
+	tx.Attach(stepUpNote, &pendingStepUp{p: p, act: act, hash: hash, summary: walletSummary(summary), lines: shown})
 	return nil
 }
 
 type pendingStepUp struct {
 	p                  *auth.Principal
 	act, hash, summary string
+	lines              []auth.ApprovalLine
 }
 
 // admitStepUp runs at commit, after the act's own checks: an act that
-// needs an approval goes ahead only with one of this very operation,
-// given on a wallet bound to the member, and not spent before.
+// needs an approval goes ahead only with one of this very act, given on
+// a wallet bound to the member, at the assurance the pack asks, and not
+// spent before.
 func (r *Register) admitStepUp(tx *store.Tx) error {
 	need, _ := tx.Detach(stepUpNote).(*pendingStepUp)
 	if need == nil {
@@ -128,9 +129,18 @@ func (r *Register) admitStepUp(tx *store.Tx) error {
 	if len(wallets) == 0 {
 		return ErrWalletNotBound
 	}
+	required := r.pk.StepUpAssurance()
 	a := p.Approval
 	if a == nil || a.OpHash != need.hash {
-		return &StepUpRequired{Act: need.act, OpHash: need.hash, Summary: need.summary, Wallet: wallets[0].Wallet, Member: p.Sub}
+		return &StepUpRequired{Act: need.act, OpHash: need.hash, Summary: need.summary, Lines: need.lines,
+			Assurance: required, Wallet: wallets[0].Wallet, Member: p.Sub}
+	}
+	switch {
+	case a.Decision != "approve":
+		return fmt.Errorf("the approval may not be used: the person declined")
+	case !auth.AssuranceMeets(a.Acr, required) || !slices.Contains(a.Amr, "webauthn") ||
+		(required == auth.AssuranceGovPresence && (!slices.Contains(a.Amr, "face") || len(a.Presence) == 0)):
+		return fmt.Errorf("the approval may not be used: this act needs %s assurance", required)
 	}
 	for _, w := range wallets {
 		if w.Wallet == a.Wallet {
@@ -139,6 +149,7 @@ func (r *Register) admitStepUp(tx *store.Tx) error {
 	}
 	return fmt.Errorf("the approval may not be used: it was given on a wallet not bound to you")
 }
+
 func (r *Register) keepApproval(tx *store.Tx, a *auth.Approval) error {
 	spent, err := tx.QueryOne("SELECT id FROM `step_up_approvals` WHERE id = " + store.Lit(a.ID))
 	if err != nil {
@@ -148,7 +159,8 @@ func (r *Register) keepApproval(tx *store.Tx, a *auth.Approval) error {
 		return fmt.Errorf("the approval may not be used: it has been used already")
 	}
 	tx.Attach(approvalNote, &model.Approval{
-		OpHash: a.OpHash, SummaryHash: a.SummaryHash, Wallet: a.Wallet, ID: a.ID, ApprovedAt: a.IssuedAt,
+		ActDigest: a.OpHash, ApprovalID: a.ApprovalID, ApprovalDigest: a.ApprovalDigest, Wallet: a.Wallet,
+		Assurance: a.Acr, ID: a.ID, ApprovedAt: a.IssuedAt, Receipt: a.Receipt, Presence: a.Presence,
 	})
 	return nil
 }
@@ -161,31 +173,21 @@ func spendApproval(tx *store.Tx, env *model.Envelope) []model.WriteOp {
 		return nil
 	}
 	env.Approval = a
-	ops := []model.WriteOp{{
+	return []model.WriteOp{{
 		Table: "step_up_approvals",
 		Key:   map[string]any{"id": a.ID},
 		Values: map[string]any{
-			"tenant": env.Tenant, "sub": env.Author.Sub, "wallet": a.Wallet, "op_hash": a.OpHash,
+			"tenant": env.Tenant, "sub": env.Author.Sub, "wallet": a.Wallet, "op_hash": a.ActDigest,
 			"approved_at": a.ApprovedAt, "txid": model.TxIDPlaceholder,
 		},
+	}, {
+		Table:  "member_wallets",
+		Key:    map[string]any{"tenant": env.Tenant, "sub": env.Author.Sub, "wallet": a.Wallet},
+		Values: map[string]any{"last_used_at": env.Timestamp},
 	}}
-	if env.Kind != model.KindWalletBind {
-		ops = append(ops, model.WriteOp{
-			Table:  "member_wallets",
-			Key:    map[string]any{"tenant": env.Tenant, "sub": env.Author.Sub, "wallet": a.Wallet},
-			Values: map[string]any{"last_used_at": env.Timestamp},
-		})
-	}
-	return ops
 }
 
-func walletSummary(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > maxWalletSummary {
-		s = string(r[:maxWalletSummary-1]) + "…"
-	}
-	return s
-}
+func walletSummary(s string) string { return auth.Displayable(s, maxWalletSummary) }
 
 // MemberWallet is one wallet bound to a member.
 type MemberWallet struct {
@@ -239,13 +241,13 @@ func (r *Register) WalletState(tenant, sub string) (string, int, error) {
 	return WalletBound, n, err
 }
 
-// BindWallet binds to the caller the wallet that approves the binding.
-// The first call is refused with StepUpRequired, which the identity
-// provider turns into a link for the wallet to scan; the call made again
-// with that approval binds the wallet whose subject it names. A member
-// may bind several; a wallet serves one member. The label is the
-// member's name for it ("work phone").
-func (r *Register) BindWallet(p *auth.Principal, label string) (*MemberWallet, *model.Transaction, error) {
+// BindWallet binds a wallet to the caller: the person's subject under
+// this register's client, which the caller proved by linking their
+// Privasys ID from their own session (the API checks the identity
+// provider's token for that link). A member may bind several; a wallet
+// serves one member. The label is the member's name for it ("work
+// phone").
+func (r *Register) BindWallet(p *auth.Principal, wallet, label string) (*MemberWallet, *model.Transaction, error) {
 	if !r.pk.StepUpUsed() {
 		return nil, nil, fmt.Errorf("this register asks for no approvals, so binds no wallets")
 	}
@@ -253,20 +255,15 @@ func (r *Register) BindWallet(p *auth.Principal, label string) (*MemberWallet, *
 	if len([]rune(label)) > 64 {
 		return nil, nil, fmt.Errorf("a wallet's label is at most 64 characters")
 	}
+	if wallet == "" || len(wallet) > 256 {
+		return nil, nil, fmt.Errorf("a binding needs the wallet it binds")
+	}
 	var (
 		out *MemberWallet
 		txn *model.Transaction
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
-		hash, err := r.operationHash(p, actBindWallet, map[string]any{"label": label})
-		if err != nil {
-			return err
-		}
-		a := p.Approval
-		if a == nil || a.OpHash != hash {
-			return &StepUpRequired{Act: actBindWallet, OpHash: hash, Member: p.Sub, Label: label,
-				Summary: walletSummary("Link this wallet to your access to " + orDefault(r.pk.Title, r.pk.Name))}
-		}
+		a := struct{ Wallet string }{wallet}
 		other, err := tx.QueryOne("SELECT sub FROM `member_wallets` WHERE tenant = " + store.Lit(p.Tenant) +
 			" AND wallet = " + store.Lit(a.Wallet))
 		if err != nil {
@@ -277,9 +274,6 @@ func (r *Register) BindWallet(p *auth.Principal, label string) (*MemberWallet, *
 				return fmt.Errorf("this wallet is already bound to you")
 			}
 			return fmt.Errorf("this wallet is already bound to another member")
-		}
-		if err := r.keepApproval(tx, a); err != nil {
-			return err
 		}
 		at := r.now()
 		txn, err = r.commit(tx, model.Envelope{
@@ -506,7 +500,8 @@ func (r *Register) stepUpDecision(tx *store.Tx, p *auth.Principal, wf *pack.Work
 		"task": task.ID, "workflow": wf.Name, "decision": decision, "reason": reason,
 		"message": d.Message, "body": d.Body, "refs": d.Refs,
 		"state": task.State, "updated_at": task.UpdatedAt,
-	}, verb+": "+orDefault(about, displayName(wf)))
+	}, verb+": "+orDefault(about, displayName(wf)),
+		auth.ApprovalLine{Label: "Decision", Value: verb}, auth.ApprovalLine{Label: "Reason", Value: reason})
 }
 
 func (r *Register) roleTitle(role string) string {

@@ -171,7 +171,12 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 // sender and the external sources. What it reports names their state and
 // never a secret.
 func (s *Server) configureMail(body []byte, out map[string]any) error {
-	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources, "sign_in": s.ConfigureSignIn, "step_up": s.ConfigureStepUp} {
+	// In order: approvals send as the sign-in client set just before.
+	for _, part := range []struct {
+		key   string
+		apply func([]byte) (string, error)
+	}{{"mail", s.ConfigureMail}, {"sources", s.ConfigureSources}, {"sign_in", s.ConfigureSignIn}, {"step_up", s.ConfigureStepUp}} {
+		key, apply := part.key, part.apply
 		if apply == nil {
 			continue
 		}

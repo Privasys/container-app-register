@@ -164,15 +164,58 @@ paths:
         "200": { description: OK }
     post:
       tags: [Step-up]
-      summary: Bind to the caller the wallet that approves the binding (428, then again with Step-Up-Approval)
+      summary: Bind the wallet the caller linked from this session, with the identity provider's token for the link
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
-            schema: { type: object, properties: { label: { type: string, maxLength: 64 } } }
+            schema:
+              type: object
+              required: [nonce]
+              properties:
+                id_token: { type: string }
+                nonce: { type: string }
+                label: { type: string, maxLength: 64 }
       responses:
         "200": { description: Bound }
-        "428": { description: Approve on the wallet; show wallet_link as a QR code when push_sent is false }
+
+  /api/v1/me/wallets/nonce:
+    post:
+      tags: [Step-up]
+      summary: A single-use nonce for linking a wallet from this session
+      responses:
+        "200": { description: The nonce and when it expires }
+
+  /api/v1/step-up/answer:
+    post:
+      tags: [Step-up]
+      summary: Where the wallet delivers the identity provider's signed answer to an approval
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approval_id, decision, token]
+              properties:
+                approval_id: { type: string }
+                decision: { type: string, enum: [approve, decline] }
+                token: { type: string }
+      responses:
+        "200": { description: Recorded }
+
+  /.well-known/privasys/approval:
+    get:
+      tags: [Step-up]
+      summary: Whether the register is waiting on this approval (the wallet shows no buttons until it is)
+      security: []
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string } }
+        - { name: digest, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Open }
+        "404": { description: Not open }
 
   /api/v1/me/wallets/{wallet}:
     delete:

@@ -410,12 +410,17 @@ type ValueSummary struct {
 	Digest  string   `json:"digest"`
 }
 
-// Approval is the record of an operation approval: the hash of the act
-// the person approved, the wallet they approved it on, and when.
+// Approval is the record of an operation approval: the digest of the act
+// the person approved, the wallet they approved it on, how and when, and
+// the identity provider's signed answer, kept as the receipt.
 type Approval struct {
-	OpHash      string `json:"op_hash"`
-	SummaryHash string `json:"summary_hash,omitempty"`
-	Wallet      string `json:"wallet"`
-	ID          string `json:"id"`
-	ApprovedAt  int64  `json:"approved_at"`
+	ActDigest      string          `json:"act_digest"`
+	ApprovalID     string          `json:"approval_id,omitempty"`
+	ApprovalDigest string          `json:"approval_digest,omitempty"`
+	Wallet         string          `json:"wallet"`
+	Assurance      string          `json:"assurance,omitempty"`
+	ID             string          `json:"id"`
+	ApprovedAt     int64           `json:"approved_at"`
+	Receipt        string          `json:"receipt,omitempty"`
+	Presence       json.RawMessage `json:"presence,omitempty"`
 }

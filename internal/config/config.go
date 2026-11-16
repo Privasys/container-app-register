@@ -237,3 +237,13 @@ func AppIDHex(raw string) string {
 	}
 	return id
 }
+
+// AppIDUUID is the app id in the dashed UUID form the control plane holds
+// it in, as identity-provider audiences name it; empty when malformed.
+func AppIDUUID(raw string) string {
+	h := AppIDHex(raw)
+	if h == "" {
+		return ""
+	}
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}

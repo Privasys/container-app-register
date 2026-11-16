@@ -66,20 +66,15 @@
                         "description": "The app registration's client secret. Kept on the sealed volume and sent only to Microsoft's token endpoint. Leave empty to keep the one held.",
                         "x-privasys": {"secret":true,"label":"Email: client secret"}
                     },
+                    "step_up_platform_url": {
+                        "type": "string",
+                        "description": "The platform's control plane, which pushes approvals to wallets for the acts the pack names under step_up (https://api.developer.privasys.org). The register calls it with its own attested identity.",
+                        "x-privasys": {"label":"Approvals: platform"}
+                    },
                     "step_up_issuer": {
                         "type": "string",
-                        "description": "The identity provider that asks wallets to approve the acts the pack names under step_up. The sign-in issuer when empty.",
+                        "description": "The identity provider that signs wallet links and approvals. The sign-in issuer when empty.",
                         "x-privasys": {"label":"Approvals: identity provider"}
-                    },
-                    "step_up_client_id": {
-                        "type": "string",
-                        "description": "The confidential client the register asks for approvals as. The sign-in client when empty.",
-                        "x-privasys": {"label":"Approvals: client identifier"}
-                    },
-                    "step_up_client_secret": {
-                        "type": "string",
-                        "description": "That client's secret. Kept on the sealed volume and sent only to the identity provider. Leave empty to keep the one held.",
-                        "x-privasys": {"secret":true,"label":"Approvals: client secret"}
                     },
                     "client_id": {
                         "type": "string",

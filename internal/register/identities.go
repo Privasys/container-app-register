@@ -196,7 +196,7 @@ func (r *Register) EraseProfile(p *auth.Principal, sub, reason string) (*model.T
 		}
 		if r.pk.StepUpErasure() {
 			if err := r.stepUp(tx, p, "erase_profile", map[string]any{"sub": sub, "reason": reason},
-				"Erase the name and address of "+r.personName(tx, sub)); err != nil {
+				"Erase the name and address of "+r.personName(tx, sub), auth.ApprovalLine{Label: "Reason", Value: reason}); err != nil {
 				return err
 			}
 		}

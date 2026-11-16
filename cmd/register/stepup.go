@@ -7,29 +7,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	"github.com/Privasys/container-app-register/internal/api"
 	"github.com/Privasys/container-app-register/internal/auth"
 	"github.com/Privasys/container-app-register/internal/config"
+	"github.com/Privasys/container-app-register/internal/platform"
 )
 
 // stepUpFile holds the approval settings a configure call gave, on the
-// sealed volume, as the mail settings are.
+// volume, so a restart keeps them.
 const stepUpFile = "stepup.json"
 
 // stepUpConfiguration is the approval part of the deployer's document:
-// the identity provider that puts acts in front of wallets, and the
-// confidential client the register asks it as. Each field is optional;
-// a call sets what it names and keeps the rest.
+// the platform's control plane, which pushes approvals to wallets, and the
+// identity provider that signs links and answers. Each field is optional;
+// a call sets what it names and keeps the rest. Nothing secret is held:
+// the register calls the control plane with its own attested identity.
 type stepUpConfiguration struct {
-	Issuer       string `json:"step_up_issuer,omitempty"`
-	ClientID     string `json:"step_up_client_id,omitempty"`
-	ClientSecret string `json:"step_up_client_secret,omitempty"`
+	PlatformURL string `json:"step_up_platform_url,omitempty"`
+	Issuer      string `json:"step_up_issuer,omitempty"`
 }
 
-// configureStepUp applies a configure call to the approval service, and
+// configureStepUp applies a configure call to the approval path, and
 // brings back what a previous call kept. With development sign-in, the
 // stand-in approves everything at once.
 func (a *application) configureStepUp(document []byte) (string, error) {
@@ -59,18 +61,17 @@ func (a *application) configureStepUp(document []byte) (string, error) {
 		}
 	}
 	given := doc != (stepUpConfiguration{})
+	if doc.PlatformURL == "" {
+		doc.PlatformURL = held.PlatformURL
+	}
 	if doc.Issuer == "" {
 		doc.Issuer = held.Issuer
 	}
-	if doc.ClientID == "" {
-		doc.ClientID = held.ClientID
-	}
-	if doc.ClientSecret == "" {
-		doc.ClientSecret = held.ClientSecret
-	}
 	if given {
-		if doc.ClientID != "" && !clientIDRe.MatchString(doc.ClientID) {
-			return "", errors.New("configuration: step_up_client_id is not a client identifier")
+		for _, u := range []string{doc.PlatformURL, doc.Issuer} {
+			if parsed, err := url.Parse(u); u != "" && (err != nil || parsed.Scheme != "https" || parsed.Host == "") {
+				return "", fmt.Errorf("configuration: %q is not an https address", u)
+			}
 		}
 		out, err := json.Marshal(doc)
 		if err != nil {
@@ -80,25 +81,24 @@ func (a *application) configureStepUp(document []byte) (string, error) {
 			return "", fmt.Errorf("step-up: %w", err)
 		}
 	}
-	if doc == (stepUpConfiguration{}) {
+	if doc.PlatformURL == "" {
 		return "", nil
 	}
-	issuer, client := doc.Issuer, doc.ClientID
+	issuer := doc.Issuer
 	if issuer == "" {
 		issuer = a.cfg.Issuer
 	}
-	if client == "" {
-		if id := a.server.SignInClient.Load(); id != nil {
-			client = *id
-		}
+	client := a.cfg.ClientID
+	if id := a.server.SignInClient.Load(); id != nil && *id != "" {
+		client = *id
 	}
-	if client == "" {
-		client = a.cfg.Audience
-	}
-	if issuer == "" || client == "" || doc.ClientSecret == "" {
+	appID := config.AppIDUUID(a.cfg.AppID)
+	notifier := platform.NewNotifier(doc.PlatformURL,
+		platform.NewManager(a.cfg.ManagerURL, a.cfg.ContainerName, a.cfg.ContainerToken))
+	if issuer == "" || client == "" || appID == "" || notifier == nil {
 		a.server.Approvals.Store(nil)
-		return "not ready: give step_up_issuer, step_up_client_id and step_up_client_secret", nil
+		return "not ready: approvals need the platform (its manager and this app's id), an issuer and a sign-in client", nil
 	}
-	a.server.Approvals.Store(&api.ApprovalService{Approvals: auth.NewIdentityApprovals(issuer, client, doc.ClientSecret)})
-	return "ready: client " + client, nil
+	a.server.Approvals.Store(&api.ApprovalService{Approvals: auth.NewWalletApprovals(issuer, appID, client, notifier.Notify)})
+	return "ready: app " + appID, nil
 }

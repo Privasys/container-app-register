@@ -182,7 +182,9 @@ func (r *Register) GrantRole(p *auth.Principal, sub, role, display, reason strin
 	err := r.st.Do(func(tx *store.Tx) error {
 		if r.pk.StepUpGrant(role) {
 			if err := r.stepUp(tx, p, "grant", map[string]any{"sub": sub, "role": role, "display": display, "reason": reason},
-				"Grant "+r.roleTitle(role)+" to "+orDefault(display, r.personName(tx, sub))); err != nil {
+				"Grant "+r.roleTitle(role)+" to "+orDefault(display, r.personName(tx, sub)),
+				auth.ApprovalLine{Label: "Role", Value: r.roleTitle(role)}, auth.ApprovalLine{Label: "Person", Value: orDefault(display, r.personName(tx, sub))},
+				auth.ApprovalLine{Label: "Reason", Value: reason}); err != nil {
 				return err
 			}
 		}
@@ -288,7 +290,9 @@ func (r *Register) RevokeRole(p *auth.Principal, sub, role, reason string) (*mod
 		}
 		if r.pk.StepUpRevoke(role) {
 			if err := r.stepUp(tx, p, "revoke", map[string]any{"sub": sub, "role": role, "reason": reason},
-				"Remove "+r.roleTitle(role)+" from "+r.personName(tx, sub)); err != nil {
+				"Remove "+r.roleTitle(role)+" from "+r.personName(tx, sub),
+				auth.ApprovalLine{Label: "Role", Value: r.roleTitle(role)}, auth.ApprovalLine{Label: "Person", Value: r.personName(tx, sub)},
+				auth.ApprovalLine{Label: "Reason", Value: reason}); err != nil {
 				return err
 			}
 		}
@@ -357,7 +361,8 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
 		if r.pk.StepUpGrant(req.Role) {
-			if err := r.stepUp(tx, p, "invite", req, "Invite someone as "+r.roleTitle(req.Role)); err != nil {
+			if err := r.stepUp(tx, p, "invite", req, "Invite someone as "+r.roleTitle(req.Role),
+				auth.ApprovalLine{Label: "Role", Value: r.roleTitle(req.Role)}, auth.ApprovalLine{Label: "Organisation", Value: req.Organisation}); err != nil {
 				return err
 			}
 		}

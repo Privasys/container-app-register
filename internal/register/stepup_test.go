@@ -52,32 +52,24 @@ func needsApproval(t *testing.T, err error) *register.StepUpRequired {
 // on wallet.
 func approved(t *testing.T, p *auth.Principal, wallet, hash string) *auth.Principal {
 	t.Helper()
-	a, err := auth.DevApproval(auth.DevApprovalToken(wallet, hash))
-	if err != nil {
-		t.Fatal(err)
-	}
 	c := *p
-	c.Approval = a
+	c.Approval = auth.DevApproval(wallet, hash)
 	return &c
 }
 
+// bindWallet binds the wallet "wallet-<sub>", as a link from the member's
+// session would.
 func bindWallet(t *testing.T, h *harness, p *auth.Principal) *register.MemberWallet {
 	t.Helper()
-	_, _, err := h.reg.BindWallet(p, "")
-	need := needsApproval(t, err)
-	if !need.Bind() || need.Wallet != "" {
-		t.Fatalf("a binding is approved by whichever wallet scans it: %+v", need)
-	}
-	b, txn, err := h.reg.BindWallet(approved(t, p, "wallet-"+p.Sub, need.OpHash), "")
+	b, txn, err := h.reg.BindWallet(p, "wallet-"+p.Sub, "")
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	if txn.Envelope.Kind != model.KindWalletBind || txn.Envelope.Approval == nil {
+	if txn.Envelope.Kind != model.KindWalletBind {
 		t.Fatalf("binding transaction %+v", txn.Envelope)
 	}
 	return b
 }
-
 func TestADecisionWaitsForTheApproversWallet(t *testing.T) {
 	h := newHarnessWith(t, t.TempDir(), carPackWithStepUp(t, false))
 	clerk := h.principal("clerk-1", "clerk")
@@ -137,7 +129,7 @@ func TestADecisionWaitsForTheApproversWallet(t *testing.T) {
 		t.Fatalf("approved decision: %v", err)
 	}
 	a := decided.Applied.Envelope.Approval
-	if a == nil || a.OpHash != need.OpHash || a.Wallet != "wallet-registrar-1" || a.ID == "" {
+	if a == nil || a.ActDigest != need.OpHash || a.Wallet != "wallet-registrar-1" || a.ID == "" {
 		t.Fatalf("the decision does not record its approval: %+v", a)
 	}
 	if decided.Task.State != model.TaskApproved {
@@ -235,9 +227,7 @@ func TestAMemberHoldsSeveralWallets(t *testing.T) {
 		t.Fatalf("binding notices %+v", sent)
 	}
 	h.tick()
-	_, _, err := h.reg.BindWallet(registrar, "Work phone")
-	need := needsApproval(t, err)
-	second, _, err := h.reg.BindWallet(approved(t, registrar, "wallet-registrar-1-b", need.OpHash), "Work phone")
+	second, _, err := h.reg.BindWallet(registrar, "wallet-registrar-1-b", "Work phone")
 	if err != nil || second.Label != "Work phone" {
 		t.Fatalf("second wallet %+v %v", second, err)
 	}
@@ -246,11 +236,10 @@ func TestAMemberHoldsSeveralWallets(t *testing.T) {
 	}
 	// A wallet serves one member.
 	clerk := h.principal("clerk-1", "clerk")
-	_, _, err = h.reg.BindWallet(clerk, "")
-	need = needsApproval(t, err)
-	if _, _, err := h.reg.BindWallet(approved(t, clerk, "wallet-registrar-1-b", need.OpHash), ""); err == nil {
+	if _, _, err := h.reg.BindWallet(clerk, "wallet-registrar-1-b", ""); err == nil {
 		t.Fatal("one wallet was bound to two members")
 	}
+	var need *register.StepUpRequired
 
 	// Either wallet approves; the one used last is asked first.
 	h.tick()
@@ -296,5 +285,42 @@ func TestAMemberHoldsSeveralWallets(t *testing.T) {
 	}
 	if all, _ := h.reg.WalletBindings(operator, ""); len(all) != 1 || all[0].Sub != "operator-1" {
 		t.Fatalf("all bindings %+v", all)
+	}
+}
+
+// A signed decline admits nothing, nor does an approval given with less
+// assurance than the pack asks.
+func TestADeclineOrTooLittleAssuranceAdmitsNothing(t *testing.T) {
+	doc := map[string]any{}
+	if err := json.Unmarshal(carPackWithStepUp(t, false), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["step_up"].(map[string]any)["assurance"] = "gov-presence"
+	raw, _ := json.Marshal(doc)
+	h := newHarnessWith(t, t.TempDir(), raw)
+	operator := h.principal("operator-1", "operator")
+	bindWallet(t, h, operator)
+	grant := func(p *auth.Principal) error {
+		_, err := h.reg.GrantRole(p, "sub-ana", "registrar", "", "Appointed.")
+		return err
+	}
+	need := needsApproval(t, grant(operator))
+	if need.Assurance != "gov-presence" || len(need.Lines) < 3 || need.Lines[0].Label != "Register" {
+		t.Fatalf("approval asked %+v", need)
+	}
+	declined := approved(t, operator, "wallet-operator-1", need.OpHash)
+	declined.Approval.Decision = "decline"
+	if err := grant(declined); err == nil || !strings.Contains(err.Error(), "declined") {
+		t.Fatalf("a decline admitted the act: %v", err)
+	}
+	device := approved(t, operator, "wallet-operator-1", need.OpHash)
+	if err := grant(device); err == nil || !strings.Contains(err.Error(), "gov-presence") {
+		t.Fatalf("a device approval admitted an act needing presence: %v", err)
+	}
+	present := approved(t, operator, "wallet-operator-1", need.OpHash)
+	present.Approval.Acr, present.Approval.Amr = "gov-presence", []string{"webauthn", "face"}
+	present.Approval.Presence = json.RawMessage(`{"holder_present":true}`)
+	if err := grant(present); err != nil {
+		t.Fatalf("a presence approval: %v", err)
 	}
 }

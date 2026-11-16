@@ -15,7 +15,8 @@ import "fmt"
 //	  "decisions": ["approve", "reject", "return"],
 //	  "grant_roles": ["registrar", "auditor"],
 //	  "revoke_roles": ["registrar", "auditor"],
-//	  "erasure": true
+//	  "erasure": true,
+//	  "assurance": "device"
 //	}
 type StepUp struct {
 	// Workflows whose decisions need an approval.
@@ -31,6 +32,10 @@ type StepUp struct {
 	// RevokeRoles are the roles whose removal needs one, directly or by
 	// ending an appointment that confers them.
 	RevokeRoles []string `json:"revoke_roles,omitempty"`
+	// Assurance is how the person must approve: "device" (face or
+	// fingerprint on their phone, the default) or "gov-presence" (a live
+	// match against their verified identity document as well).
+	Assurance string `json:"assurance,omitempty"`
 	// Erasure makes every erasure of personal data need one.
 	Erasure bool `json:"erasure,omitempty"`
 }
@@ -51,6 +56,9 @@ func (p *Pack) validateStepUp() error {
 		if p.Workflow(w) == nil {
 			return fmt.Errorf("step_up: no workflow named %q", w)
 		}
+	}
+	if s.Assurance != "" && s.Assurance != "device" && s.Assurance != "gov-presence" {
+		return fmt.Errorf("step_up: assurance is device or gov-presence, not %q", s.Assurance)
 	}
 	for _, d := range s.Decisions {
 		if d != StepUpApprove && d != StepUpReject && d != StepUpReturn {
@@ -103,3 +111,11 @@ func (p *Pack) StepUpRevoke(role string) bool {
 
 // StepUpErasure reports whether an erasure needs one.
 func (p *Pack) StepUpErasure() bool { return p.StepUp != nil && p.StepUp.Erasure }
+
+// StepUpAssurance is the assurance an approval must be given with.
+func (p *Pack) StepUpAssurance() string {
+	if p.StepUp == nil || p.StepUp.Assurance == "" {
+		return "device"
+	}
+	return p.StepUp.Assurance
+}

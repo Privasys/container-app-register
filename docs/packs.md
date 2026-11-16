@@ -329,7 +329,8 @@ face. `step_up` names those acts:
   "propose": false,
   "grant_roles": ["registrar"],
   "revoke_roles": ["registrar"],
-  "erasure": true
+  "erasure": true,
+  "assurance": "device"
 }
 ```
 
@@ -342,28 +343,44 @@ face. `step_up` names those acts:
   appointment that confers them.
 - `erasure`: every erasure of personal data, of a record or of a profile.
 
-**How an act is approved.** The register computes the operation: the act,
-the register, the tenant, the acting member and the request it is about to
-commit (for a decision, also the task as it stands). It asks the identity
-provider to put the operation's hash and a one-line summary in front of
-the member's bound wallet, and answers `428` with `error: "step_up_required"`,
-`approval_id`, `summary`, `push_sent`, `wallet_link` (to show as a QR code
-when no push reached the wallet) and `expires_at`. The page polls
+**How an act is approved.** The register computes the act's digest: the
+SHA-256 of the act, the register, the tenant, the acting member and the
+request it is about to commit (for a decision, also the task as it stands).
+It sends the member's wallet, through the platform, an approval: a title
+and a few labelled lines saying what is being approved, the digest, and
+the assurance asked. It answers `428` with `error: "step_up_required"`,
+`approval_id`, `summary`, `assurance`, `push_sent` and `expires_at`. The
+wallet asks the register whether the approval is still open
+(`GET /.well-known/privasys/approval?id=…&digest=…`), shows it, and
+delivers the identity provider's signed answer to
+`POST /api/v1/step-up/answer`. The page polls
 `GET /api/v1/step-up/{approval_id}` (`pending`, `approved`, `declined`,
 `expired`) and, once approved, sends the same request again with the header
 `Step-Up-Approval: <approval_id>` (or the query parameter
-`step_up_approval`, for a transport that sets no headers). The register holds the token the
-identity provider issued, checks it names the member's bound wallet and the
-operation it is about to commit, and commits. The transaction's envelope
-records the `approval` (operation hash, wallet, approval identifier, time),
-and the approval is spent: it never admits a second act. A changed request
-(another decision, another reason) needs a fresh approval. Acting with no
-wallet bound is refused with `412` and `detail: "wallet_not_bound"`.
+`step_up_approval`, for a transport that sets no headers). The answer never
+passes through the browser. The register checks it was signed by the
+identity provider for this app, answers this approval, approves this very
+act on a wallet bound to the member at the assurance asked, and has not
+been used, and commits. The transaction's envelope keeps the `approval`
+(act digest, approval, wallet, assurance, time, and the signed answer as
+the receipt), and the approval is spent: it never admits a second act. A
+changed request (another decision, another reason) needs a fresh approval.
+Acting with no wallet bound is refused with `412` and
+`detail: "wallet_not_bound"`. An act refused on its merits (no permission,
+out of scope, invalid) is refused before any approval is asked.
+
+`assurance` is `device` (face or fingerprint on the phone, the default) or
+`gov-presence` (also a live match against the person's verified identity
+document).
 
 **Binding wallets.** A member binds wallets as they would register
-devices. `POST /api/v1/me/wallets` (optional `{"label": "Work phone"}`) is
-approved the same way, by whichever wallet scans the link, and binds the
-approving wallet to the caller. A member may bind several, and any of them
+devices, by linking their Privasys ID from their own signed-in session:
+the page asks for a single-use nonce (`POST /api/v1/me/wallets/nonce`),
+the wallet links with it, and the page sends the identity provider's token
+for that link (`POST /api/v1/me/wallets` with `id_token`, `nonce` and an
+optional `label` such as "Work phone"). The register checks the token
+(signature, this register's client, the nonce, a WebAuthn confirmation)
+and binds the person's subject. A member may bind several, and any of them
 approves (the one used last is asked first); a wallet serves one member.
 The member lists theirs (`GET /api/v1/me/wallets`: label, `bound_at`,
 `last_used_at`) and removes one (`DELETE /api/v1/me/wallets/{wallet}`).
@@ -386,11 +403,13 @@ The templates read `.Member` (the member's name), `.WalletLabel`, `.At`
 and `.Reason`. `GET /api/v1/me` says `step_up: true` and the caller's
 `wallet` (`state`: `none` or `bound`, and `count`).
 
-The identity provider and client are set by the configure call
-(`step_up_issuer`, `step_up_client_id`, `step_up_client_secret`); with
-development sign-in, a stand-in approves everything at once and binds the
-wallet `dev-wallet:<sub>`, or `dev-wallet:<sub>:<label>` when the binding
-gives a label, so a member can bind several.
+The configure call names the platform's control plane
+(`step_up_platform_url`), which pushes approvals to wallets, and the
+identity provider (`step_up_issuer`, the sign-in issuer by default). The
+register calls the control plane with its own attested identity, so it
+holds no secret for this. With development sign-in, a stand-in approves
+everything at once and binds the wallet `dev-wallet:<sub>`, or
+`dev-wallet:<sub>:<label>` when the binding gives a label.
 
 ## Notifications
 

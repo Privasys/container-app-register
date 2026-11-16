@@ -328,7 +328,7 @@ func (r *Register) EndAppointmentHolding(p *auth.Principal, class, key, reason s
 		}
 		if r.pk.StepUpRevoke(row.Str("role")) {
 			if err := r.stepUp(tx, p, "end_holding", map[string]any{"class": class, "key": key, "reason": reason},
-				"End "+r.personName(tx, row.Str("sub"))+"'s holding of "+label+" "+key); err != nil {
+				"End "+r.personName(tx, row.Str("sub"))+"'s holding of "+label+" "+key, auth.ApprovalLine{Label: "Reason", Value: reason}); err != nil {
 				return err
 			}
 		}

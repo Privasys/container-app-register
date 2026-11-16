@@ -245,7 +245,8 @@ func (r *Register) Erase(p *auth.Principal, req ErasureRequest) (*ErasureResult,
 			return fmt.Errorf("%s has no personal data to erase", req.ObjectID)
 		}
 		if r.pk.StepUpErasure() {
-			if err := r.stepUp(tx, p, "erase", req, "Erase the personal data of "+req.ObjectID); err != nil {
+			if err := r.stepUp(tx, p, "erase", req, "Erase personal data from a "+strings.ReplaceAll(class.Name, "_", " ")+" record",
+				auth.ApprovalLine{Label: "Record", Value: req.ObjectID}, auth.ApprovalLine{Label: "Policy", Value: policy.ID}, auth.ApprovalLine{Label: "Reason", Value: req.Reason}); err != nil {
 				return err
 			}
 		}
