@@ -142,6 +142,15 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 			}
 		}
 
+		if r.pk.StepUpPropose(wf.Name) {
+			if err := r.stepUp(tx, p, "propose", map[string]any{
+				"workflow": wf.Name, "object_id": req.ObjectID, "payload": req.Payload, "evidence": req.Evidence,
+				"message": req.Message, "body": req.Body, "refs": req.Refs,
+			}, "Propose: "+displayName(wf)); err != nil {
+				return err
+			}
+		}
+
 		taskID, err := NewTaskID()
 		if err != nil {
 			return err
@@ -353,6 +362,9 @@ func (r *Register) Decide(p *auth.Principal, taskID string, d Decision) (*Outcom
 		if task.State != model.TaskAwaitingReview {
 			return fmt.Errorf("this proposal is %s and is not awaiting a decision", task.State)
 		}
+		if err := r.stepUpDecision(tx, p, wf, task, decisionName(d.Approve), d.Reason, d); err != nil {
+			return err
+		}
 		applied, decided, err := r.decide(tx, p, wf, task, d)
 		if err != nil {
 			return err
@@ -400,6 +412,9 @@ func (r *Register) Return(p *auth.Principal, taskID, reason string) (*Outcome, e
 		}
 		if task.State != model.TaskAwaitingReview {
 			return fmt.Errorf("this proposal is %s and is not awaiting a decision", task.State)
+		}
+		if err := r.stepUpDecision(tx, p, wf, task, pack.StepUpReturn, reason, Decision{Reason: reason}); err != nil {
+			return err
 		}
 		at := r.now()
 		ops := []model.WriteOp{{

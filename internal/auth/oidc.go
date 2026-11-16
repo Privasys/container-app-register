@@ -107,48 +107,9 @@ func NewJWKSVerifier(issuer, audience string) *JWKSVerifier {
 
 // Verify checks signature, issuer, audience and expiry.
 func (v *JWKSVerifier) Verify(ctx context.Context, token string) (*Identity, error) {
-	parts := strings.SplitN(token, ".", 3)
-	if len(parts) != 3 {
-		return nil, errors.New("auth: malformed token")
-	}
-	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	_, claims, err := v.verifyJWT(ctx, token)
 	if err != nil {
-		return nil, fmt.Errorf("auth: header decode: %w", err)
-	}
-	var header struct {
-		Alg string `json:"alg"`
-		Kid string `json:"kid"`
-	}
-	if err := json.Unmarshal(headerJSON, &header); err != nil {
-		return nil, fmt.Errorf("auth: header parse: %w", err)
-	}
-	key, err := v.signingKey(ctx, header.Kid, header.Alg)
-	if err != nil {
-		return nil, fmt.Errorf("auth: key lookup: %w", err)
-	}
-	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil {
-		return nil, fmt.Errorf("auth: signature decode: %w", err)
-	}
-	if err := verifySignature(header.Alg, key, []byte(parts[0]+"."+parts[1]), sig); err != nil {
-		return nil, fmt.Errorf("auth: signature: %w", err)
-	}
-	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, fmt.Errorf("auth: claims decode: %w", err)
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
-		return nil, fmt.Errorf("auth: claims parse: %w", err)
-	}
-	if iss, _ := claims["iss"].(string); iss != v.issuer {
-		return nil, fmt.Errorf("auth: issuer %q is not %q", iss, v.issuer)
-	}
-	if v.audience != "" && !audienceMatches(claims, v.audience) {
-		return nil, fmt.Errorf("auth: token is not for audience %q", v.audience)
-	}
-	if exp, ok := claims["exp"].(float64); ok && time.Now().Unix() > int64(exp) {
-		return nil, errors.New("auth: token expired")
+		return nil, err
 	}
 	id := &Identity{Issuer: v.issuer, Roles: rolesClaim(claims), Claims: claims}
 	id.Sub, _ = claims["sub"].(string)
@@ -161,6 +122,56 @@ func (v *JWKSVerifier) Verify(ctx context.Context, token string) (*Identity, err
 		return nil, errors.New("auth: token has no subject")
 	}
 	return id, nil
+}
+
+// verifyJWT checks a token's signature, issuer, audience and expiry,
+// and returns its type header and claims.
+func (v *JWKSVerifier) verifyJWT(ctx context.Context, token string) (string, map[string]any, error) {
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
+		return "", nil, errors.New("auth: malformed token")
+	}
+	headerJSON, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return "", nil, fmt.Errorf("auth: header decode: %w", err)
+	}
+	var header struct {
+		Alg string `json:"alg"`
+		Typ string `json:"typ"`
+		Kid string `json:"kid"`
+	}
+	if err := json.Unmarshal(headerJSON, &header); err != nil {
+		return "", nil, fmt.Errorf("auth: header parse: %w", err)
+	}
+	key, err := v.signingKey(ctx, header.Kid, header.Alg)
+	if err != nil {
+		return "", nil, fmt.Errorf("auth: key lookup: %w", err)
+	}
+	sig, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil {
+		return "", nil, fmt.Errorf("auth: signature decode: %w", err)
+	}
+	if err := verifySignature(header.Alg, key, []byte(parts[0]+"."+parts[1]), sig); err != nil {
+		return "", nil, fmt.Errorf("auth: signature: %w", err)
+	}
+	claimsJSON, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", nil, fmt.Errorf("auth: claims decode: %w", err)
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(claimsJSON, &claims); err != nil {
+		return "", nil, fmt.Errorf("auth: claims parse: %w", err)
+	}
+	if iss, _ := claims["iss"].(string); iss != v.issuer {
+		return "", nil, fmt.Errorf("auth: issuer %q is not %q", iss, v.issuer)
+	}
+	if v.audience != "" && !audienceMatches(claims, v.audience) {
+		return "", nil, fmt.Errorf("auth: token is not for audience %q", v.audience)
+	}
+	if exp, ok := claims["exp"].(float64); ok && time.Now().Unix() > int64(exp) {
+		return "", nil, errors.New("auth: token expired")
+	}
+	return header.Typ, claims, nil
 }
 
 func rolesClaim(claims map[string]any) []string {

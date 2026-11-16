@@ -244,6 +244,11 @@ func (r *Register) Erase(p *auth.Principal, req ErasureRequest) (*ErasureResult,
 		if key == nil {
 			return fmt.Errorf("%s has no personal data to erase", req.ObjectID)
 		}
+		if r.pk.StepUpErasure() {
+			if err := r.stepUp(tx, p, "erase", req, "Erase the personal data of "+req.ObjectID); err != nil {
+				return err
+			}
+		}
 		affected, err := tx.Count("SELECT COUNT(*) FROM `record_versions` WHERE enc_scope = " + store.Lit(scope))
 		if err != nil {
 			return err

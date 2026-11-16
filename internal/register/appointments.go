@@ -326,6 +326,12 @@ func (r *Register) EndAppointmentHolding(p *auth.Principal, class, key, reason s
 		if row == nil {
 			return fmt.Errorf("nobody holds %s %s", label, key)
 		}
+		if r.pk.StepUpRevoke(row.Str("role")) {
+			if err := r.stepUp(tx, p, "end_holding", map[string]any{"class": class, "key": key, "reason": reason},
+				"End "+r.personName(tx, row.Str("sub"))+"'s holding of "+label+" "+key); err != nil {
+				return err
+			}
+		}
 		at := r.now()
 		txn, err = r.commit(tx, model.Envelope{
 			Kind: model.KindMemberRevoke, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,

@@ -144,6 +144,52 @@ paths:
       responses:
         "200": { description: Unbound }
 
+  /api/v1/step-up/{id}:
+    get:
+      tags: [Step-up]
+      summary: Whether the person approved the act on their wallet (pending, approved, declined, expired)
+      description: >-
+        An act the pack names under step_up is refused with 428 step_up_required and an approval_id;
+        once this says approved, send the same request again with the header Step-Up-Approval.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: The approval's state }
+
+  /api/v1/me/wallet:
+    post:
+      tags: [Step-up]
+      summary: Bind to the caller the wallet that approves the binding (428, then again with Step-Up-Approval)
+      responses:
+        "200": { description: Bound, or pending an administrator's confirmation }
+        "428": { description: Approve on the wallet; show wallet_link as a QR code when push_sent is false }
+
+  /api/v1/wallet-bindings:
+    get:
+      tags: [Step-up]
+      summary: The wallets bound to members
+      responses:
+        "200": { description: OK }
+
+  /api/v1/wallet-bindings/{sub}/confirm:
+    post:
+      tags: [Step-up]
+      summary: Confirm a member's newly bound wallet, approving on your own
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Confirmed }
+
+  /api/v1/wallet-bindings/{sub}:
+    delete:
+      tags: [Step-up]
+      summary: Unbind a member's wallet, say for a lost phone
+      parameters:
+        - { name: sub, in: path, required: true, schema: { type: string } }
+        - { name: reason, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Unbound }
+
   /api/v1/invites:
     get:
       tags: [Membership]

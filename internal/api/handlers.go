@@ -171,7 +171,7 @@ func (s *Server) configure(w http.ResponseWriter, r *http.Request) {
 // sender and the external sources. What it reports names their state and
 // never a secret.
 func (s *Server) configureMail(body []byte, out map[string]any) error {
-	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources, "sign_in": s.ConfigureSignIn} {
+	for key, apply := range map[string]func([]byte) (string, error){"mail": s.ConfigureMail, "sources": s.ConfigureSources, "sign_in": s.ConfigureSignIn, "step_up": s.ConfigureStepUp} {
 		if apply == nil {
 			continue
 		}
@@ -313,6 +313,16 @@ func (s *Server) me(req *request) (any, error) {
 	// Whether the register's console is open to this person; the console
 	// shows itself only when it is.
 	out["console"] = pk.ConsoleServed() && pk.ConsoleOpenTo(req.p.Roles)
+	// Whether some acts here are approved on a wallet, and whether this
+	// person has one bound, so a screen can ask them to bind it first.
+	if pk.StepUpUsed() {
+		state, err := req.reg.WalletState(req.p.Tenant, req.p.Sub)
+		if err != nil {
+			return nil, err
+		}
+		out["step_up"] = true
+		out["wallet"] = map[string]any{"state": state}
+	}
 	return out, nil
 }
 

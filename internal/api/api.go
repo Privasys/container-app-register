@@ -127,6 +127,13 @@ type Server struct {
 	// SignInProviders narrows the federated identities the console offers
 	// on a direct name; empty offers them all.
 	SignInProviders []string
+	// Approvals is the identity provider's approval service, once a
+	// configure call sets one; acts the pack names wait for it.
+	Approvals atomic.Pointer[ApprovalService]
+	// ConfigureStepUp takes the configuration document and returns the
+	// state of the approval service, as ConfigureMail does for the sender.
+	ConfigureStepUp func(document []byte) (string, error)
+	approvals       approvalBook
 }
 
 // NewServer builds the HTTP surface in its unconfigured state.
@@ -194,6 +201,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/members", s.wrap(s.grantMember))
 	mux.HandleFunc("DELETE /api/v1/members/{sub}/{role}", s.wrap(s.revokeMember))
 	mux.HandleFunc("DELETE /api/v1/appointments/{class}/{key}/holder", s.wrap(s.endAppointmentHolding))
+
+	// Step-up: approvals on the wallet bound to each member.
+	mux.HandleFunc("GET /api/v1/step-up/{id}", s.wrap(s.stepUpState))
+	mux.HandleFunc("POST /api/v1/me/wallet", s.wrap(s.bindWallet))
+	mux.HandleFunc("GET /api/v1/wallet-bindings", s.wrap(s.listWalletBindings))
+	mux.HandleFunc("POST /api/v1/wallet-bindings/{sub}/confirm", s.wrap(s.confirmWallet))
+	mux.HandleFunc("DELETE /api/v1/wallet-bindings/{sub}", s.wrap(s.unbindWallet))
 
 	mux.HandleFunc("GET /api/v1/sources/{name}/{key}", s.wrap(s.describeSource))
 	mux.HandleFunc("POST /api/v1/sources/{name}/{key}/import", s.wrap(s.importFromSource))
@@ -315,11 +329,26 @@ func (s *Server) wrap(h handler) http.HandlerFunc {
 			writeError(w, http.StatusForbidden, "not authorised", err.Error())
 			return
 		}
+		// An act sent again once the person approved it.
+		approvalID, approval, err := s.approvalFor(r, principal)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), "")
+			return
+		}
+		principal.Approval = approval
 		result, err := h(&request{w: w, r: r, reg: reg, p: principal, id: id, tenant: tenant})
+		var need *register.StepUpRequired
+		if errors.As(err, &need) {
+			s.askApproval(w, r, principal, need)
+			return
+		}
 		if err != nil {
 			status, detail := classify(err)
 			writeError(w, status, err.Error(), detail)
 			return
+		}
+		if approval != nil {
+			s.approvals.forget(approvalID)
 		}
 		if _, ok := result.(written); ok {
 			return
@@ -492,6 +521,8 @@ func classify(err error) (int, string) {
 	switch {
 	case errors.Is(err, register.ErrInvite):
 		return http.StatusGone, ""
+	case errors.Is(err, register.ErrWalletNotBound):
+		return http.StatusPreconditionFailed, "wallet_not_bound"
 	case errors.Is(err, register.ErrOneOrganisation):
 		return http.StatusConflict, ""
 	case strings.Contains(text, "may not"), strings.Contains(text, "separation of duties"),

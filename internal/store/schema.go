@@ -351,6 +351,40 @@ var baseTables = []tableDDL{
 		},
 	},
 	{
+		// The wallet each member approves their acts on. A member has one;
+		// a wallet serves one member. Pending until an administrator
+		// confirms it, when the pack asks for that.
+		name: "wallet_bindings",
+		ddl: `CREATE TABLE ` + "`wallet_bindings`" + ` (
+			id VARCHAR(400) PRIMARY KEY,
+			tenant VARCHAR(64) NOT NULL,
+			sub VARCHAR(256) NOT NULL,
+			wallet VARCHAR(256) NOT NULL,
+			state VARCHAR(24) NOT NULL,
+			bound_at BIGINT NOT NULL,
+			confirmed_by VARCHAR(256) NOT NULL,
+			confirmed_at BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL
+		)`,
+		indexes: []string{
+			"CREATE INDEX `wallet_bindings_wallet` ON `wallet_bindings` (tenant, wallet)",
+		},
+	},
+	{
+		// The operation approvals spent, one row each, written with the
+		// act they approved: an approval is never spent twice.
+		name: "step_up_approvals",
+		ddl: `CREATE TABLE ` + "`step_up_approvals`" + ` (
+			id VARCHAR(191) PRIMARY KEY,
+			tenant VARCHAR(64) NOT NULL,
+			sub VARCHAR(256) NOT NULL,
+			wallet VARCHAR(256) NOT NULL,
+			op_hash VARCHAR(64) NOT NULL,
+			approved_at BIGINT NOT NULL,
+			txid CHAR(64) NOT NULL
+		)`,
+	},
+	{
 		// The roles an organisation holds, which its members inherit.
 		name: "organisation_roles",
 		ddl: `CREATE TABLE ` + "`organisation_roles`" + ` (

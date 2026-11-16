@@ -119,6 +119,9 @@ type Principal struct {
 	// PII reports whether any held role clears the caller to see
 	// personal data in the clear.
 	PII bool `json:"pii"`
+	// Approval is the operation approval the request carries, verified
+	// against the identity provider; nil when it carries none.
+	Approval *Approval `json:"-"`
 
 	perms map[string]bool
 }

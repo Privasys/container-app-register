@@ -45,6 +45,8 @@ type Pack struct {
 	// ConsoleRoles names the roles that may use the register's console.
 	// Absent, every role may; empty, the console is not served at all.
 	ConsoleRoles *[]string `json:"console_roles,omitempty"`
+	// StepUp names the acts that need a person's approval on their wallet.
+	StepUp *StepUp `json:"step_up,omitempty"`
 
 	classByName    map[string]*Class
 	workflowByName map[string]*Workflow
@@ -531,6 +533,9 @@ func (p *Pack) validate() error {
 		return fmt.Errorf("pack: %w", err)
 	}
 	if err := p.validateNotifications(); err != nil {
+		return fmt.Errorf("pack: %w", err)
+	}
+	if err := p.validateStepUp(); err != nil {
 		return fmt.Errorf("pack: %w", err)
 	}
 	if err := p.validateConsole(); err != nil {

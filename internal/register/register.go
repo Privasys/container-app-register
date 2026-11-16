@@ -176,6 +176,8 @@ var pkColumns = map[string][]string{
 	"organisation_roles":   {"tenant", "organisation", "role"},
 	"invite_appointments":  {"id"},
 	"appointment_holders":  {"tenant", "class", "natural_key"},
+	"wallet_bindings":      {"id"},
+	"step_up_approvals":    {"id"},
 	"registry":             {"k"},
 }
 
@@ -216,6 +218,9 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 			env.Author.Organisation = affs[0].Organisation
 		}
 	}
+
+	// An act admitted with an approval spends it here, in its own commit.
+	ops = append(ops, spendApproval(tx, &env)...)
 
 	txid, err := transactionID(env, ops)
 	if err != nil {

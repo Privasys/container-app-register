@@ -194,6 +194,12 @@ func (r *Register) EraseProfile(p *auth.Principal, sub, reason string) (*model.T
 		if row == nil {
 			return fmt.Errorf("the register holds no profile for this person")
 		}
+		if r.pk.StepUpErasure() {
+			if err := r.stepUp(tx, p, "erase_profile", map[string]any{"sub": sub, "reason": reason},
+				"Erase the name and address of "+r.personName(tx, sub)); err != nil {
+				return err
+			}
+		}
 		scope := row.Str("scope")
 		key, err := tx.QueryOne("SELECT destroyed_at FROM `dek_keys` WHERE scope = " + store.Lit(scope))
 		if err != nil {

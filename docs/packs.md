@@ -315,6 +315,68 @@ A pack whose scoped roles are all held by appointment needs no
 role, and the values of `keys`), and `GET /api/v1/members` lists each
 current holding with the `appointment` that gives it.
 
+## Step-up: acts approved on a wallet
+
+A signed-in session says who is at the keyboard. For the acts that carry
+the most weight, a pack can ask for more: that the person approves the act
+itself, at the time, on the wallet bound to them, with their fingerprint or
+face. `step_up` names those acts:
+
+```json
+"step_up": {
+  "workflows": ["first_registration", "scrappage"],
+  "decisions": ["approve", "reject", "return"],
+  "propose": false,
+  "grant_roles": ["registrar"],
+  "revoke_roles": ["registrar"],
+  "erasure": true,
+  "bind_confirmation": true
+}
+```
+
+- `workflows` and `decisions`: a reviewer's decisions on these workflows
+  (all three when `decisions` is absent). `propose: true` adds proposing
+  into them. A decision made under policy is not a person's act and needs
+  nothing.
+- `grant_roles` and `revoke_roles`: granting these roles, directly or by an
+  invitation to them, and removing them, directly or by ending an
+  appointment that confers them.
+- `erasure`: every erasure of personal data, of a record or of a profile.
+- `bind_confirmation`: a newly bound wallet waits until an administrator
+  confirms it (except the first in the register, which nobody could).
+
+**How an act is approved.** The register computes the operation: the act,
+the register, the tenant, the acting member and the request it is about to
+commit (for a decision, also the task as it stands). It asks the identity
+provider to put the operation's hash and a one-line summary in front of
+the member's bound wallet, and answers `428` with `error: "step_up_required"`,
+`approval_id`, `summary`, `push_sent`, `wallet_link` (to show as a QR code
+when no push reached the wallet) and `expires_at`. The page polls
+`GET /api/v1/step-up/{approval_id}` (`pending`, `approved`, `declined`,
+`expired`) and, once approved, sends the same request again with the header
+`Step-Up-Approval: <approval_id>`. The register holds the token the
+identity provider issued, checks it names the member's bound wallet and the
+operation it is about to commit, and commits. The transaction's envelope
+records the `approval` (operation hash, wallet, approval identifier, time),
+and the approval is spent: it never admits a second act. A changed request
+(another decision, another reason) needs a fresh approval. Acting with no
+wallet bound is refused with `412` and `detail: "wallet_not_bound"`.
+
+**Binding a wallet.** `POST /api/v1/me/wallet` is approved the same way,
+by whichever wallet scans the link; the approving wallet is bound to the
+caller. A wallet serves one member and a member has one wallet.
+Administrators (`members` permission) list bindings
+(`GET /api/v1/wallet-bindings`), confirm one, approving on their own wallet
+(`POST /api/v1/wallet-bindings/{sub}/confirm`), and unbind one with a
+reason, say for a lost phone (`DELETE /api/v1/wallet-bindings/{sub}?reason=…`).
+`GET /api/v1/me` says `step_up: true` and the caller's `wallet.state`
+(`none`, `pending_confirmation`, `bound`).
+
+The identity provider and client are set by the configure call
+(`step_up_issuer`, `step_up_client_id`, `step_up_client_secret`); with
+development sign-in, a stand-in approves everything at once and binds the
+wallet `dev-wallet:<sub>`.
+
 ## Notifications
 
 A pack can have the register write to people when a workflow event

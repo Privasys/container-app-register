@@ -63,6 +63,9 @@ const (
 	KindNotificationSent   = "notification.sent"
 	KindAffiliationAdmin   = "affiliation.admin"
 	KindPackSeed           = "pack.seed"
+	KindWalletBind         = "wallet.bind"
+	KindWalletConfirm      = "wallet.confirm"
+	KindWalletUnbind       = "wallet.unbind"
 )
 
 // Ref is a typed link from a transaction to an earlier transaction or
@@ -96,6 +99,9 @@ type Envelope struct {
 	Timestamp int64    `json:"timestamp"`
 	Message   string   `json:"message"`
 	Refs      []Ref    `json:"refs,omitempty"`
+	// Approval is the operation approval the act carried, when the pack
+	// asks for one: the person approved this very act on their wallet.
+	Approval *Approval `json:"approval,omitempty"`
 }
 
 // Summary returns the first line of the message.
@@ -402,4 +408,14 @@ type ValueSummary struct {
 	Columns []string `json:"columns"`
 	Bytes   int      `json:"bytes"`
 	Digest  string   `json:"digest"`
+}
+
+// Approval is the record of an operation approval: the hash of the act
+// the person approved, the wallet they approved it on, and when.
+type Approval struct {
+	OpHash      string `json:"op_hash"`
+	SummaryHash string `json:"summary_hash,omitempty"`
+	Wallet      string `json:"wallet"`
+	ID          string `json:"id"`
+	ApprovedAt  int64  `json:"approved_at"`
 }

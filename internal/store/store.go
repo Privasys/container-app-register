@@ -185,8 +185,9 @@ func (s *Store) Do(fn func(*Tx) error) error {
 // ledger commit each; between Begin and Commit they buffer and land as a
 // single commit, so a governance action occupies exactly one version.
 type Tx struct {
-	s   *Store
-	ctx *gms.Context
+	s     *Store
+	ctx   *gms.Context
+	notes map[string]any
 }
 
 // Ledger exposes the authenticated core for proofs, history and
@@ -608,4 +609,20 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "…"
+}
+
+// Attach keeps a value with this transaction until Detach takes it: what
+// one step of an action decides for a later step in the same block.
+func (t *Tx) Attach(key string, v any) {
+	if t.notes == nil {
+		t.notes = map[string]any{}
+	}
+	t.notes[key] = v
+}
+
+// Detach takes back what Attach kept, once.
+func (t *Tx) Detach(key string) any {
+	v := t.notes[key]
+	delete(t.notes, key)
+	return v
 }

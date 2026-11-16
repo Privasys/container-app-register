@@ -180,6 +180,12 @@ func (r *Register) GrantRole(p *auth.Principal, sub, role, display, reason strin
 	}
 	var txn *model.Transaction
 	err := r.st.Do(func(tx *store.Tx) error {
+		if r.pk.StepUpGrant(role) {
+			if err := r.stepUp(tx, p, "grant", map[string]any{"sub": sub, "role": role, "display": display, "reason": reason},
+				"Grant "+r.roleTitle(role)+" to "+orDefault(display, r.personName(tx, sub))); err != nil {
+				return err
+			}
+		}
 		var err error
 		txn, err = r.grant(tx, model.KindMemberGrant, principalAuthor(p), p.Tenant, sub, role, reason, nil)
 		return err
@@ -280,6 +286,12 @@ func (r *Register) RevokeRole(p *auth.Principal, sub, role, reason string) (*mod
 					clip(sub, 24))
 			}
 		}
+		if r.pk.StepUpRevoke(role) {
+			if err := r.stepUp(tx, p, "revoke", map[string]any{"sub": sub, "role": role, "reason": reason},
+				"Remove "+r.roleTitle(role)+" from "+r.personName(tx, sub)); err != nil {
+				return err
+			}
+		}
 		at := r.now()
 		env := model.Envelope{
 			Kind: model.KindMemberRevoke, Tenant: p.Tenant, Author: principalAuthor(p), Timestamp: at,
@@ -344,6 +356,11 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 		secret string
 	)
 	err := r.st.Do(func(tx *store.Tx) error {
+		if r.pk.StepUpGrant(req.Role) {
+			if err := r.stepUp(tx, p, "invite", req, "Invite someone as "+r.roleTitle(req.Role)); err != nil {
+				return err
+			}
+		}
 		if req.Appointment != "" {
 			var err error
 			inv, secret, err = r.inviteToAppointment(tx, p, req)
