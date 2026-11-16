@@ -364,6 +364,10 @@ func registerSite(mux *http.ServeMux, s *Server) {
 		mux.HandleFunc("GET "+st.Prefix, s.siteStatic(*st))
 	}
 	console := func(w http.ResponseWriter, r *http.Request) {
+		if !s.consoleServed() {
+			writeError(w, http.StatusNotFound, "no such endpoint", r.URL.Path)
+			return
+		}
 		index := filepath.Join(s.WebDir, "index.html")
 		if _, err := os.Stat(index); s.WebDir == "" || err != nil {
 			writeError(w, http.StatusNotFound, "no console in this build", r.URL.Path)

@@ -61,6 +61,10 @@ func (s *Server) staticHandler() http.Handler {
 		p := path.Clean("/" + r.URL.Path)
 		index := filepath.Join(dir, "index.html")
 		if p == "/" {
+			if s.site == nil && !s.consoleServed() {
+				writeError(w, http.StatusNotFound, "no such endpoint", r.URL.Path)
+				return
+			}
 			if _, err := os.Stat(index); dir == "" || err != nil {
 				// A build with no UI still says what it is.
 				s.mu.RLock()
@@ -90,4 +94,12 @@ func (s *Server) staticHandler() http.Handler {
 		}
 		files.ServeHTTP(w, r)
 	})
+}
+
+// consoleServed reports whether the console page may be served: a pack
+// can switch it off. Before a register is configured it is served, as
+// the configure gate is the console's to show.
+func (s *Server) consoleServed() bool {
+	reg, _, ready := s.register()
+	return !ready || reg.Pack().ConsoleServed()
 }

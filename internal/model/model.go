@@ -79,6 +79,10 @@ type Author struct {
 	Sub     string `json:"sub"`
 	Display string `json:"display,omitempty"`
 	Role    string `json:"role"`
+	// Organisation is the key of the organisation the author belonged to
+	// when the change was made, when they belonged to one: who they acted
+	// for. A key, never a person's name.
+	Organisation string `json:"organisation,omitempty"`
 }
 
 // Envelope is the commit envelope hashed into every transaction.
@@ -182,6 +186,10 @@ type WriteOp struct {
 	Key    map[string]any `json:"key"`
 	Values map[string]any `json:"values,omitempty"`
 	Delete bool           `json:"delete,omitempty"`
+	// Summary stands in for Values when a write set is served to a reader
+	// not cleared to see them. It is never stored: a stored write set
+	// always carries its values.
+	Summary *ValueSummary `json:"summary,omitempty"`
 }
 
 // TxIDPlaceholder stands in for the transaction id inside a write set.
@@ -386,4 +394,12 @@ type EvidenceBundle struct {
 	KeyID      string            `json:"key_id"`
 	Algorithm  string            `json:"alg"`
 	Signature  string            `json:"signature"`
+}
+
+// ValueSummary says what a write wrote without showing it: the columns,
+// the size, and a digest of the canonical values.
+type ValueSummary struct {
+	Columns []string `json:"columns"`
+	Bytes   int      `json:"bytes"`
+	Digest  string   `json:"digest"`
 }

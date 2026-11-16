@@ -15,10 +15,19 @@ export function App() {
     );
 }
 
-/** A person with a role gets the console; anyone else is told where they
- *  stand. */
+/** A person with a role the console is open to gets it; anyone else is
+ *  told where they stand. */
 function Console() {
-    const { me } = useSession();
+    const { me, signOut } = useSession();
+    if (me.status === 'member' && me.console === false) {
+        return (
+            <main className="welcome">
+                <h1>{me.register.title || 'Register'}</h1>
+                <p>This console is not open to your role here.</p>
+                <button onClick={signOut}>Sign out</button>
+            </main>
+        );
+    }
     return me.status === 'member' ? <Shell /> : <Welcome />;
 }
 

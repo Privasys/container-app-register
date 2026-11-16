@@ -352,6 +352,8 @@ type HistoryEntry struct {
 	Version     *model.RecordVersion `json:"version"`
 	Transaction *model.Transaction   `json:"transaction,omitempty"`
 	Diff        map[string][2]any    `json:"diff,omitempty"`
+	// Actor is who made the change, for a role that sees actors.
+	Actor *Actor `json:"actor,omitempty"`
 }
 
 // History returns a record's whole timeline, newest first.
@@ -390,6 +392,26 @@ func (r *Register) History(p *auth.Principal, objectID string) ([]HistoryEntry, 
 			}
 			entries = append(entries, entry)
 			previous = v
+		}
+		txns := make([]*model.Transaction, 0, len(entries))
+		for _, e := range entries {
+			txns = append(txns, e.Transaction)
+		}
+		served, err := r.servedWrites(tx, p, txns)
+		if err != nil {
+			return err
+		}
+		for i := range entries {
+			entries[i].Transaction = served[i]
+		}
+		actors, err := r.actorsIn(tx, p, txns)
+		if err != nil {
+			return err
+		}
+		for i := range entries {
+			if entries[i].Transaction != nil {
+				entries[i].Actor = actors[entries[i].Transaction.TxID]
+			}
 		}
 		for i := len(entries) - 1; i >= 0; i-- {
 			out = append(out, entries[i])
@@ -491,13 +513,22 @@ func (r *Register) Log(p *auth.Principal, f LogFilter) ([]*model.Transaction, er
 		}
 		out = append(out, txn)
 	}
-	return out, nil
+	// What each change wrote, as far as the caller may read it.
+	var served []*model.Transaction
+	err = r.st.Do(func(tx *store.Tx) error {
+		var err error
+		served, err = r.servedWrites(tx, p, out)
+		return err
+	})
+	return served, err
 }
 
 // TransactionDetail is one transaction with its typed references.
 type TransactionDetail struct {
 	*model.Transaction
 	Refs []model.Ref `json:"refs"`
+	// Actor is who made the change, for a role that sees actors.
+	Actor *Actor `json:"actor,omitempty"`
 }
 
 // Transaction returns one transaction in full.
@@ -518,10 +549,19 @@ func (r *Register) Transaction(p *auth.Principal, txid string) (*TransactionDeta
 		if err != nil {
 			return err
 		}
-		detail := &TransactionDetail{Transaction: txn}
+		served, err := r.servedWrites(tx, p, []*model.Transaction{txn})
+		if err != nil {
+			return err
+		}
+		detail := &TransactionDetail{Transaction: served[0]}
 		for _, row := range rows {
 			detail.Refs = append(detail.Refs, model.Ref{Type: row.Str("ref_type"), Target: row.Str("target")})
 		}
+		actors, err := r.actorsIn(tx, p, []*model.Transaction{txn})
+		if err != nil {
+			return err
+		}
+		detail.Actor = actors[txid]
 		out = detail
 		return nil
 	})

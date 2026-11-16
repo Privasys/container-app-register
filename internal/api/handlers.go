@@ -310,6 +310,9 @@ func (s *Server) me(req *request) (any, error) {
 	}
 	out["appointments"] = appointments
 	out["role_titles"] = titles
+	// Whether the register's console is open to this person; the console
+	// shows itself only when it is.
+	out["console"] = pk.ConsoleServed() && pk.ConsoleOpenTo(req.p.Roles)
 	return out, nil
 }
 
@@ -711,6 +714,14 @@ func (s *Server) log_(req *request) (any, error) {
 	})
 	if err != nil {
 		return nil, err
+	}
+	// Who made each change, for a role that sees actors.
+	actors, err := req.reg.Actors(req.p, entries)
+	if err != nil {
+		return nil, err
+	}
+	if actors != nil {
+		return map[string]any{"transactions": entries, "count": len(entries), "actors": actors}, nil
 	}
 	return map[string]any{"transactions": entries, "count": len(entries)}, nil
 }

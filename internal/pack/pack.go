@@ -42,6 +42,9 @@ type Pack struct {
 	Invitations   []*InvitationRule  `json:"invitations,omitempty"`
 	Appointments  []*Appointment     `json:"appointments,omitempty"`
 	Notifications []*Notification    `json:"notifications,omitempty"`
+	// ConsoleRoles names the roles that may use the register's console.
+	// Absent, every role may; empty, the console is not served at all.
+	ConsoleRoles *[]string `json:"console_roles,omitempty"`
 
 	classByName    map[string]*Class
 	workflowByName map[string]*Workflow
@@ -528,6 +531,9 @@ func (p *Pack) validate() error {
 		return fmt.Errorf("pack: %w", err)
 	}
 	if err := p.validateNotifications(); err != nil {
+		return fmt.Errorf("pack: %w", err)
+	}
+	if err := p.validateConsole(); err != nil {
 		return fmt.Errorf("pack: %w", err)
 	}
 	if err := p.validateInvitations(); err != nil {

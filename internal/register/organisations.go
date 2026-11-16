@@ -93,25 +93,30 @@ func (r *Register) organisationExists(tx *store.Tx, tenant, key string) (bool, e
 func (r *Register) OrganisationName(tenant, key string) string {
 	name := key
 	_ = r.st.Do(func(tx *store.Tx) error {
-		class, err := r.organisationClass()
-		if err != nil {
-			return err
-		}
-		row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(tenant) +
-			" AND class = " + store.Lit(class.Name) + " AND natural_key = " + store.Lit(key))
-		if err != nil || row == nil {
-			return err
-		}
-		head, err := r.headVersion(tx, class, row.Str("id"))
-		if err != nil {
-			return err
-		}
-		if n, ok := unwrap(head.Payload["legal_name"]).(string); ok && n != "" {
-			name = n
-		}
+		name = r.organisationNameIn(tx, tenant, key)
 		return nil
 	})
 	return name
+}
+
+func (r *Register) organisationNameIn(tx *store.Tx, tenant, key string) string {
+	class, err := r.organisationClass()
+	if err != nil {
+		return key
+	}
+	row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(tenant) +
+		" AND class = " + store.Lit(class.Name) + " AND natural_key = " + store.Lit(key))
+	if err != nil || row == nil {
+		return key
+	}
+	head, err := r.headVersion(tx, class, row.Str("id"))
+	if err != nil {
+		return key
+	}
+	if n, ok := unwrap(head.Payload["legal_name"]).(string); ok && n != "" {
+		return n
+	}
+	return key
 }
 
 // isOrganisationAdmin says whether the person administers the organisation.

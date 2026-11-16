@@ -23,6 +23,8 @@ export interface Me {
     principal?: Principal;
     permissions?: string[];
     role_titles?: Record<string, string>;
+    /** Whether the register's console is open to this person. */
+    console?: boolean;
 }
 
 export interface PackClass {

@@ -289,7 +289,7 @@ paths:
   /api/v1/records/{id}/history:
     get:
       tags: [Records, History]
-      summary: A record's timeline, with the transaction behind each version
+      summary: A record's timeline, with the transaction behind each version (writes the reader may not read summarised; actor for roles with history_actors)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -379,7 +379,7 @@ paths:
   /api/v1/log:
     get:
       tags: [History]
-      summary: The transaction log, newest first
+      summary: The transaction log, newest first (explorer; writes the reader may not read summarised; actors by txid for roles with history_actors)
       parameters:
         - { name: class, in: query, schema: { type: string } }
         - { name: object_id, in: query, schema: { type: string } }
@@ -397,7 +397,7 @@ paths:
   /api/v1/log/{txid}:
     get:
       tags: [History]
-      summary: One transaction — envelope, write set, roots before and after
+      summary: One transaction — envelope, write set (summarised where the reader may not read it), roots before and after, and the actor for roles with history_actors
       parameters:
         - { name: txid, in: path, required: true, schema: { type: string } }
       responses:

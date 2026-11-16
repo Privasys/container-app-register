@@ -54,6 +54,11 @@ type RoleSpec struct {
 	// acting under the more powerful of the two: separation of duties is
 	// only real if the system notices when it is breached.
 	IncompatibleWith []string `json:"incompatible_with,omitempty"`
+	// HistoryActors shows who made each change in the histories and logs
+	// the role may read: the author's name, email and organisation, from
+	// their sealed profile. Without it a change names its author by
+	// subject and role only.
+	HistoryActors bool `json:"history_actors,omitempty"`
 }
 
 // Model is a register's whole role model.

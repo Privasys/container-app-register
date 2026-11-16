@@ -188,6 +188,42 @@ incompatible roles is refused outright rather than acting under the
 more powerful of the two: a breach the system does not notice is not a
 control.
 
+`history_actors: true` shows the role who made each change, in the
+histories and logs it may already read: the author's name and email
+from their sealed profile, and the organisation they acted for (recorded
+with the change as `author.organisation`; for a change made before that
+was recorded, the organisation they belonged to then, when known). A
+history entry and a transaction carry it as `actor`; the log as
+`actors`, by transaction id. Without the flag a change names its author
+by subject and role only, which is all a transaction ever holds: a name
+in it could not be erased. When a person's profile is erased, their
+changes go back to naming a subject. Changes the register makes on its
+own (system authors, approvals under policy) have no actor.
+
+### What a change wrote
+
+The log, a transaction and a record's history serve each transaction's
+write set as far as the reader may read it. A write to a record (its
+object, versions, natural key or projection) keeps its values for a
+reader who may read the record's class within their scope; any other
+write keeps them only for a role that holds both `admin` and `pii`.
+Otherwise the write keeps its table, key and whether it deletes, and its
+values give way to a `summary`: the columns, the size and a SHA-256
+digest. An auditor checks what changed, and when, without reading it.
+
+### The console
+
+```json
+"console_roles": ["operator", "auditor"]
+```
+
+names the roles the register's console is open to: `GET /api/v1/me`
+says `console: true` or `false`, and the console shows itself only when
+it is open. An empty list switches the console off: its page is not
+served at all. Absent, every role may use it. The console is a view of
+the API, and every call it makes is checked as any other is: this
+setting says who is offered it, not what they may do.
+
 ### Invitation rules
 
 An organisation's administrator invites colleagues into it. A pack can let

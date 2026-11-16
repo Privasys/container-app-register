@@ -204,6 +204,19 @@ func (r *Register) commit(tx *store.Tx, env model.Envelope, ops []model.WriteOp)
 		}
 	}
 
+	// Who the author acted for is recorded with the change: an
+	// affiliation can end, and the history must still say it.
+	if env.Author.Organisation == "" && r.pk.Organisations != nil && env.Author.Sub != "" &&
+		!strings.HasPrefix(env.Author.Sub, "system:") {
+		affs, err := r.affiliationsIn(tx, env.Tenant, env.Author.Sub)
+		if err != nil {
+			return nil, err
+		}
+		if len(affs) == 1 {
+			env.Author.Organisation = affs[0].Organisation
+		}
+	}
+
 	txid, err := transactionID(env, ops)
 	if err != nil {
 		return nil, err
