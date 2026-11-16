@@ -20,6 +20,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -159,11 +160,20 @@ func (s *Store) Close() error {
 // Dir is the directory the store lives in.
 func (s *Store) Dir() string { return s.dir }
 
+// ErrClosed refuses work on a store that has been closed.
+var ErrClosed = errors.New("store: closed")
+
 // Do runs fn with exclusive access to the store. Everything that
 // touches the ledger goes through it.
 func (s *Store) Do(fn func(*Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Work that outlives the store (a count in the background when the
+	// register is reconfigured) is refused, not run against a closed
+	// backend.
+	if s.closed {
+		return ErrClosed
+	}
 	// One session for the whole block. A SQL transaction is session
 	// state, so a fresh context per statement would silently discard
 	// BEGIN and commit each statement on its own.

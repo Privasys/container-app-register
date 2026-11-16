@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 )
 
 // Layout is the version of the table layout this build writes. A data
@@ -96,6 +98,10 @@ var baseTables = []tableDDL{
 			"CREATE UNIQUE INDEX `obj_natural_key` ON `objects` (tenant, class, natural_key)",
 			"CREATE INDEX `obj_class` ON `objects` (tenant, class, status)",
 			"CREATE INDEX `obj_updated` ON `objects` (updated_at)",
+			// A page of a class in the order it changed, without sorting the class:
+			// the listing orders by these columns, which the index serves as they are.
+			"CREATE INDEX `obj_class_updated` ON `objects` (tenant, class, updated_at)",
+			"CREATE INDEX `obj_class_status_updated` ON `objects` (tenant, class, status, updated_at)",
 		},
 	},
 	{
@@ -136,6 +142,7 @@ var baseTables = []tableDDL{
 		indexes: []string{
 			"CREATE INDEX `rec_txid` ON `record_versions` (txid)",
 			"CREATE INDEX `rec_scope` ON `record_versions` (enc_scope)",
+			"CREATE INDEX `rec_pruned` ON `record_versions` (pruned)",
 		},
 	},
 	{
@@ -230,6 +237,7 @@ var baseTables = []tableDDL{
 		)`,
 		indexes: []string{
 			"CREATE INDEX `dek_subject` ON `dek_keys` (tenant, subject)",
+			"CREATE INDEX `dek_destroyed` ON `dek_keys` (destroyed_at)",
 		},
 	},
 	{
@@ -427,6 +435,11 @@ func (s *Store) Migrate() error {
 		}
 		for _, t := range baseTables {
 			if existing[t.name] {
+				// A table from an earlier build gains the indexes added
+				// since; building one reads the table once, at start.
+				if err := tx.AddMissingIndexes(t.name, t.indexes); err != nil {
+					return err
+				}
 				continue
 			}
 			if err := tx.Exec(t.ddl); err != nil {
@@ -484,4 +497,28 @@ func (s *Store) checkLayout() error {
 		return fmt.Errorf("store: data directory %s holds table layout 1 (BLOB payload columns) and this build writes layout %s; point REGISTER_DATA_DIR at a fresh directory or restore from an export", s.dir, Layout)
 	}
 	return os.WriteFile(marker, []byte(Layout+"\n"), 0o600)
+}
+
+var indexName = regexp.MustCompile("(?i)^CREATE (?:UNIQUE )?INDEX `([^`]+)`")
+
+// AddMissingIndexes creates each declared index the table lacks.
+func (t *Tx) AddMissingIndexes(table string, declared []string) error {
+	rows, err := t.Query("SHOW INDEXES FROM " + Ident(table))
+	if err != nil {
+		return err
+	}
+	have := map[string]bool{}
+	for _, row := range rows {
+		have[strings.ToLower(row.Str("key_name"))] = true
+	}
+	for _, ddl := range declared {
+		m := indexName.FindStringSubmatch(ddl)
+		if m == nil || have[strings.ToLower(m[1])] {
+			continue
+		}
+		if err := t.Exec(ddl); err != nil {
+			return fmt.Errorf("store: index %s on %s: %w", m[1], table, err)
+		}
+	}
+	return nil
 }

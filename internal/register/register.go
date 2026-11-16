@@ -80,6 +80,16 @@ type Register struct {
 	// notices sends the notifications that follow workflow events.
 	notices NoticeSink
 
+	// The table counts Status reports, taken in the background on a
+	// large register.
+	countsMu   sync.Mutex
+	counts     *statusCounts
+	counting   bool
+	countsDone chan struct{}
+
+	// text is the in-memory index a search for part of a value reads.
+	text textIndex
+
 	// mu guards the in-memory view of the last checkpoint. Ledger
 	// serialisation is the store's job.
 	mu       sync.RWMutex
@@ -117,6 +127,10 @@ func New(st *store.Store, p *pack.Pack, mat *keys.Material, opts Options) (*Regi
 	if err := r.loadLastCheckpoint(); err != nil {
 		return nil, err
 	}
+	// The first count of the tables Status reports, taken in the background.
+	r.refreshCounts()
+	// And the listing indexes, so a first page does not build one.
+	r.warmListings()
 	return r, nil
 }
 

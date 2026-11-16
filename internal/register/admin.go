@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"strings"
+	"time"
 
 	ledger "github.com/Privasys/immutable-ledger/ledger"
 
@@ -337,6 +338,130 @@ type Status struct {
 	LastCheckpoint  *model.SignedCheckpoint `json:"last_checkpoint,omitempty"`
 	CheckpointKeyID string                  `json:"checkpoint_key_id"`
 	CheckpointKey   string                  `json:"checkpoint_public_key"`
+	// CountedAt is the ledger version the counts were taken at. Counting
+	// reads whole tables, so a large register serves the last count and
+	// takes the next one in the background.
+	CountedAt uint64 `json:"counted_at_version"`
+}
+
+// statusCounts is one count of the tables Status reports.
+type statusCounts struct {
+	version                                                                     uint64
+	took                                                                        time.Duration
+	transactions, objects, pendingTasks, pendingTxns, prunedVersions, destroyed int64
+}
+
+// countsOnTheSpot is how long a count may take for Status to wait for
+// it: a register that counts faster is always counted exactly.
+const countsOnTheSpot = 250 * time.Millisecond
+
+func (r *Register) countTables() (*statusCounts, error) {
+	c := &statusCounts{}
+	start := time.Now()
+	// Each count is its own short hold on the store, and each is served by
+	// an index or a key: a count never reads a whole large table at once.
+	err := r.st.Do(func(tx *store.Tx) error {
+		_, c.version = tx.Root()
+		// Transactions are numbered from 1 and never removed.
+		n, err := tx.Count("SELECT COALESCE(MAX(seq), 0) FROM `transactions`")
+		c.transactions = n
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	counts := []struct {
+		stmt string
+		out  *int64
+	}{
+		{"SELECT COUNT(*) FROM `tasks` WHERE tenant = " + store.Lit(r.opts.Tenant) +
+			" AND state IN ('awaiting_review','awaiting_counterparty','proposed')", &c.pendingTasks},
+		{"SELECT COUNT(*) FROM `transactions` WHERE state = 'pending'", &c.pendingTxns},
+		{"SELECT COUNT(*) FROM `record_versions` WHERE pruned = TRUE", &c.prunedVersions},
+		{"SELECT COUNT(*) FROM `dek_keys` WHERE destroyed_at > 0", &c.destroyed},
+	}
+	for _, q := range counts {
+		if err := r.st.Do(func(tx *store.Tx) error {
+			n, err := tx.Count(q.stmt)
+			*q.out = n
+			return err
+		}); err != nil {
+			return nil, err
+		}
+	}
+	// Records, a chunk at a time in key order.
+	after := ""
+	for {
+		var rows []store.Row
+		if err := r.st.Do(func(tx *store.Tx) error {
+			var err error
+			rows, err = tx.Query("SELECT id FROM `objects` WHERE id > " + store.Lit(after) + " ORDER BY id LIMIT 1000")
+			return err
+		}); err != nil {
+			return nil, err
+		}
+		c.objects += int64(len(rows))
+		if len(rows) < 1000 {
+			break
+		}
+		after = rows[len(rows)-1].Str("id")
+	}
+	c.took = time.Since(start)
+	return c, nil
+}
+
+// refreshCounts takes a count in the background, one at a time.
+func (r *Register) refreshCounts() {
+	r.countsMu.Lock()
+	if r.counting {
+		r.countsMu.Unlock()
+		return
+	}
+	r.counting = true
+	done := make(chan struct{})
+	r.countsDone = done
+	r.countsMu.Unlock()
+	go func() {
+		c, err := r.countTables()
+		r.countsMu.Lock()
+		if err == nil {
+			r.counts = c
+		}
+		r.counting = false
+		r.countsMu.Unlock()
+		close(done)
+	}()
+}
+
+// currentCounts returns counts for Status: exact when counting is quick
+// or nothing has changed since the last count, the last count otherwise.
+func (r *Register) currentCounts(version uint64) (*statusCounts, error) {
+	r.countsMu.Lock()
+	c, done := r.counts, r.countsDone
+	counting := r.counting
+	r.countsMu.Unlock()
+	if c == nil && counting {
+		// The first count since start is under way: wait for it once.
+		<-done
+		r.countsMu.Lock()
+		c = r.counts
+		r.countsMu.Unlock()
+	}
+	if c != nil && c.version == version {
+		return c, nil
+	}
+	if c == nil || c.took < countsOnTheSpot {
+		fresh, err := r.countTables()
+		if err != nil {
+			return nil, err
+		}
+		r.countsMu.Lock()
+		r.counts = fresh
+		r.countsMu.Unlock()
+		return fresh, nil
+	}
+	r.refreshCounts()
+	return c, nil
 }
 
 // Status gathers the register's current position.
@@ -351,27 +476,19 @@ func (r *Register) Status() (*Status, error) {
 		s.Root, s.LedgerVersion = tx.Root()
 		s.HistoryChain = tx.HistoryEnabled()
 		s.HistoryHead, _, _ = tx.HistoryHead()
-		counts := []struct {
-			stmt string
-			out  *int64
-		}{
-			{"SELECT COUNT(*) FROM `transactions`", &s.Transactions},
-			{"SELECT COUNT(*) FROM `objects`", &s.Objects},
-			{"SELECT COUNT(*) FROM `tasks` WHERE state IN ('awaiting_review','awaiting_counterparty','proposed')", &s.PendingTasks},
-			{"SELECT COUNT(*) FROM `transactions` WHERE state = 'pending'", &s.PendingTxns},
-			{"SELECT COUNT(*) FROM `record_versions` WHERE pruned = TRUE", &s.PrunedVersions},
-			{"SELECT COUNT(*) FROM `dek_keys` WHERE destroyed_at <> 0", &s.DestroyedKeys},
-		}
-		for _, c := range counts {
-			n, err := tx.Count(c.stmt)
-			if err != nil {
-				return err
-			}
-			*c.out = n
-		}
 		return nil
 	})
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	c, err := r.currentCounts(s.LedgerVersion)
+	if err != nil {
+		return nil, err
+	}
+	s.CountedAt = c.version
+	s.Transactions, s.Objects, s.PendingTasks = c.transactions, c.objects, c.pendingTasks
+	s.PendingTxns, s.PrunedVersions, s.DestroyedKeys = c.pendingTxns, c.prunedVersions, c.destroyed
+	return s, nil
 }
 
 // Tasks lists workflow proposals.

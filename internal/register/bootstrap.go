@@ -57,6 +57,10 @@ func (r *Register) ensureProjections() error {
 				return err
 			}
 			if tables[class.QueryTable()] && have == want {
+				// An index added since the table was built is added to it.
+				if err := tx.AddMissingIndexes(class.QueryTable(), indexes); err != nil {
+					return err
+				}
 				continue
 			}
 			if tables[class.QueryTable()] {
@@ -94,6 +98,11 @@ func projectionDDL(class *pack.Class) (string, []string) {
 	indexes := []string{
 		fmt.Sprintf("CREATE INDEX %s ON %s (tenant, status)",
 			store.Ident(class.QueryTable()+"_scope"), store.Ident(class.QueryTable())),
+		// What changed since a time: the register keeps its listing order and
+		// its text index up to date from this. Two underscores keep the name
+		// clear of the projected columns.
+		fmt.Sprintf("CREATE INDEX %s ON %s (updated_at)",
+			store.Ident(class.QueryTable()+"__changed"), store.Ident(class.QueryTable())),
 	}
 	for _, p := range class.Compiled().Projections() {
 		fmt.Fprintf(&b, ",\n  %s %s NOT NULL", store.Ident(p.Column), columnType(p.Type))
@@ -242,7 +251,15 @@ func (r *Register) registerSchema(class *pack.Class) error {
 // a change to which properties are queryable is visible in the log.
 func fingerprintOf(class *pack.Class) string {
 	ddl, indexes := projectionDDL(class)
-	return fingerprint(append([]string{ddl}, indexes...))
+	// The change index is the register's own, added to existing tables
+	// in place: it does not make a projection different.
+	kept := []string{ddl}
+	for _, idx := range indexes {
+		if !strings.Contains(idx, "__changed") {
+			kept = append(kept, idx)
+		}
+	}
+	return fingerprint(kept)
 }
 
 // -- retention policies ----------------------------------------------------

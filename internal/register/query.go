@@ -60,10 +60,16 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 		projections[proj.Column] = true
 	}
 	clauses := []string{"o.tenant = " + store.Lit(p.Tenant), "o.class = " + store.Lit(class.Name)}
+	// joined says whether a condition or the order reads the query table;
+	// selective says whether a condition other than the text narrows the
+	// records through an index.
+	joined, selective := false, false
 	if err := r.st.Do(func(tx *store.Tx) error {
 		clause, err := r.scopeClause(tx, p, class)
 		if clause != "" {
 			clauses = append(clauses, clause)
+			joined = joined || strings.Contains(clause, "q.")
+			selective = true
 		}
 		return err
 	}); err != nil {
@@ -75,44 +81,134 @@ func (r *Register) ListObjects(p *auth.Principal, f ListFilter) ([]ObjectSummary
 	if f.Search != "" {
 		clauses = append(clauses, "o.natural_key LIKE "+store.Lit(escapeLike(f.Search)+"%"))
 	}
-	if text := strings.TrimSpace(f.Text); text != "" {
-		// Case does not matter: people type names as they remember them.
-		like := escapeLike(strings.ToLower(text))
-		ors := []string{"LOWER(o.natural_key) LIKE " + store.Lit(like+"%")}
-		for _, col := range f.TextColumns {
-			if !projections[col] {
-				return nil, fmt.Errorf("%s is not a queryable property of %s", col, class.Name)
-			}
-			ors = append(ors, "LOWER(q."+store.Ident(col)+") LIKE "+store.Lit("%"+like+"%"))
+	for _, col := range f.TextColumns {
+		if !projections[col] {
+			return nil, fmt.Errorf("%s is not a queryable property of %s", col, class.Name)
 		}
-		clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
 	}
 	for _, col := range sortedKeys(f.Match) {
 		if !projections[col] {
 			return nil, fmt.Errorf("%s is not a queryable property of %s", col, class.Name)
 		}
 		clauses = append(clauses, "q."+store.Ident(col)+" = "+store.Lit(f.Match[col]))
-	}
-	order := "o.updated_at"
-	if f.Order != "" {
-		switch {
-		case f.Order == "natural_key" || f.Order == "status" || f.Order == "created_at" || f.Order == "updated_at":
-			order = "o." + store.Ident(f.Order)
-		case projections[f.Order]:
-			order = "q." + store.Ident(f.Order)
-		default:
-			return nil, fmt.Errorf("%s is not a sortable property of %s", f.Order, class.Name)
-		}
+		joined, selective = true, true
 	}
 	direction := "ASC"
 	if f.Desc {
 		direction = "DESC"
 	}
-	stmt := fmt.Sprintf(
-		"SELECT o.*, q.* FROM `objects` AS o JOIN %s AS q ON q.object_id = o.id WHERE %s ORDER BY %s %s LIMIT %d OFFSET %d",
-		store.Ident(class.QueryTable()), strings.Join(clauses, " AND "), order, direction,
-		clampLimit(f.Limit), max(f.Offset, 0))
+	var orderBy []string
+	switch f.Order {
+	case "", "updated_at", "natural_key", "status", "created_at":
+		col := f.Order
+		if col == "" {
+			col = "updated_at"
+		}
+		// The id settles ties, as the listing index does.
+		orderBy = []string{"o." + store.Ident(col), "o.id"}
+	default:
+		if !projections[f.Order] {
+			return nil, fmt.Errorf("%s is not a sortable property of %s", f.Order, class.Name)
+		}
+		orderBy = []string{"q." + store.Ident(f.Order)}
+		joined, selective = true, true
+	}
+	for i := range orderBy {
+		orderBy[i] += " " + direction
+	}
+	order := strings.Join(orderBy, ", ")
+	limit, offset := clampLimit(f.Limit), max(f.Offset, 0)
+	text := strings.TrimSpace(f.Text)
 
+	if selective {
+		// A match, a scope or an order on the projections: SQL finds the
+		// records through the indexes, and a text condition is checked on
+		// just those.
+		if text != "" {
+			// Case does not matter: people type names as they remember them.
+			like := escapeLike(strings.ToLower(text))
+			ors := []string{"LOWER(o.natural_key) LIKE " + store.Lit(like+"%")}
+			for _, col := range f.TextColumns {
+				ors = append(ors, "LOWER(q."+store.Ident(col)+") LIKE "+store.Lit("%"+like+"%"))
+				joined = true
+			}
+			clauses = append(clauses, "("+strings.Join(ors, " OR ")+")")
+		}
+		return r.listPage(class, projections, strings.Join(clauses, " AND "), order, joined, limit, offset)
+	}
+
+	// Otherwise the listing index gives the candidates in order, already
+	// narrowed by status, key and text; SQL reads them a batch at a time,
+	// with every condition again, until the page is full.
+	candidates, _, err := r.listCandidates(p.Tenant, class, f.Status, f.Search, text, f.TextColumns, f.Order, f.Desc)
+	if err != nil {
+		return nil, err
+	}
+	// The index has narrowed by the text, so the reads go by key alone: a
+	// text condition here would have SQL read the whole query table.
+	out := []ObjectSummary{}
+	for start := offset; start < len(candidates) && len(out) < limit; {
+		ids := candidates[start:min(start+limit-len(out), len(candidates))]
+		start += len(ids)
+		lits := make([]string, len(ids))
+		for i, id := range ids {
+			lits[i] = store.Lit(id)
+		}
+		where := strings.Join(append(append([]string{}, clauses...), "o.id IN ("+strings.Join(lits, ", ")+")"), " AND ")
+		got, err := r.listPage(class, projections, where, order, false, len(ids), 0)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, got...)
+	}
+	return out, nil
+}
+
+// listPage runs one listing query.
+func (r *Register) listPage(class *pack.Class, projections map[string]bool, where, order string, joined bool, limit, offset int) ([]ObjectSummary, error) {
+	page := fmt.Sprintf("LIMIT %d OFFSET %d", limit, offset)
+	qt := store.Ident(class.QueryTable())
+	if !joined {
+		// The page from the records alone, then the projections of just
+		// those records, by their key.
+		rows, err := r.st.Query("SELECT o.* FROM `objects` AS o WHERE " + where + " ORDER BY " + order + " " + page)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]ObjectSummary, 0, len(rows))
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, ObjectSummary{Object: decodeObject(row), Projection: map[string]any{}})
+			ids = append(ids, store.Lit(row.Str("id")))
+		}
+		if len(ids) == 0 {
+			return out, nil
+		}
+		qrows, err := r.st.Query("SELECT * FROM " + qt + " WHERE object_id IN (" + strings.Join(ids, ", ") + ")")
+		if err != nil {
+			return nil, err
+		}
+		byID := make(map[string]store.Row, len(qrows))
+		for _, row := range qrows {
+			byID[row.Str("object_id")] = row
+		}
+		for i := range out {
+			row := byID[out[i].ID]
+			for col := range projections {
+				if v, ok := row[col]; ok {
+					out[i].Projection[col] = v
+				}
+			}
+		}
+		return out, nil
+	}
+
+	// A condition on the projections: the query table's indexes find the
+	// records, and each is joined to its object by key. The engine has no
+	// statistics to choose this order for itself.
+	stmt := fmt.Sprintf(
+		"SELECT /*+ JOIN_ORDER(q, o) LOOKUP_JOIN(q, o) */ o.*, q.* FROM `objects` AS o JOIN %s AS q ON q.object_id = o.id WHERE %s ORDER BY %s %s",
+		qt, where, order, page)
 	rows, err := r.st.Query(stmt)
 	if err != nil {
 		return nil, err
