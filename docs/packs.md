@@ -353,7 +353,11 @@ the assurance asked. It answers `428` with `error: "step_up_required"`,
 wallet asks the register whether the approval is still open
 (`GET /.well-known/privasys/approval?id=…&digest=…`), shows it, and
 delivers the identity provider's signed answer to
-`POST /api/v1/step-up/answer`. The page polls
+`POST /api/v1/step-up/answer`. The wallet calls both without signing in,
+so the app's manifest declares them: `/.well-known/privasys/` as a static
+surface, and the answer as a public route
+(`"public": [{"method": "POST", "path": "/api/v1/step-up/answer"}]`); the
+platform refuses a static surface under `/api`. The page polls
 `GET /api/v1/step-up/{approval_id}` (`pending`, `approved`, `declined`,
 `expired`) and, once approved, sends the same request again with the header
 `Step-Up-Approval: <approval_id>` (or the query parameter

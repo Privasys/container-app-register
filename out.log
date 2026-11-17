@@ -1,0 +1,2 @@
+timeout: failed to run command './reg.exe': No such file or directory
+exit 127

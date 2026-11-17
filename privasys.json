@@ -16,7 +16,11 @@
             "/favicon.svg",
             "/openapi.yaml",
             "/public/",
-            "/id/"
+            "/id/",
+            "/.well-known/privasys/"
+        ],
+        "public": [
+            {"method": "POST", "path": "/api/v1/step-up/answer"}
         ],
         "direct": "private"
     },
