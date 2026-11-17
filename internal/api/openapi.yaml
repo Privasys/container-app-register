@@ -252,7 +252,8 @@ paths:
       tags: [Membership]
       summary: Invitations, without their secrets
       responses:
-        "200": { description: OK }
+        "200":
+          description: OK. An emailed invitation carries emailed true; while it is open it also carries to {name, email, organisation}, opened from the sealed recipient. Once it is used, withdrawn or expired the recipient is destroyed and to is absent.
     post:
       tags: [Membership]
       summary: Issue a single-use invitation; the link is returned once

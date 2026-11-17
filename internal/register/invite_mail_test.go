@@ -101,3 +101,47 @@ func TestAnOpenInvitationIsNotForgotten(t *testing.T) {
 		t.Fatalf("forgot an open invitation: %d %v", n, err)
 	}
 }
+
+// Those who manage members see who an open emailed invitation is for, and
+// once it is finished only that it was emailed.
+func TestAnOpenEmailedInvitationShowsWhoItIsFor(t *testing.T) {
+	h := newHarness(t)
+	h.tick()
+	operator := h.principal("operator-1", "operator")
+	to := register.InviteRecipient{Email: "shown@example.invalid", Name: "Shown Person", Organisation: "Shown Firm"}
+	emailed, _, err := h.reg.CreateEmailedInvite(operator, "registrar", 14*24*time.Hour, to)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.tick()
+	bare, _, err := h.reg.CreateInvite(operator, "registrar", "a link", 14*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := func() map[string]*register.Invite {
+		t.Helper()
+		all, err := h.reg.Invites(operator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]*register.Invite{}
+		for _, inv := range all {
+			out[inv.ID] = inv
+		}
+		return out
+	}
+	got := listed()
+	if e := got[emailed.ID]; !e.Emailed || e.To == nil || e.To.Email != to.Email || e.To.Name != to.Name || e.To.Organisation != to.Organisation {
+		t.Fatalf("the open emailed invitation listed as %+v", e)
+	}
+	if b := got[bare.ID]; b.Emailed || b.To != nil {
+		t.Fatalf("the bare link listed as %+v", b)
+	}
+	h.tick()
+	if _, err := h.reg.RevokeInvite(operator, emailed.ID); err != nil {
+		t.Fatal(err)
+	}
+	if e := listed()[emailed.ID]; !e.Emailed || e.To != nil {
+		t.Fatalf("the withdrawn invitation listed as %+v", e)
+	}
+}

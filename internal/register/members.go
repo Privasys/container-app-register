@@ -64,6 +64,19 @@ type Invite struct {
 	// person is bound to, for an invitation to an appointment.
 	AppointmentClass string `json:"appointment_class,omitempty"`
 	Appointment      string `json:"appointment,omitempty"`
+	// Emailed says the invitation was sent by email. To is who it was
+	// sent to, shown to those who manage members while it is open; once
+	// it is finished the recipient is destroyed and To is absent.
+	Emailed bool          `json:"emailed,omitempty"`
+	To      *InviteeShown `json:"to,omitempty"`
+}
+
+// InviteeShown is who an open emailed invitation is for, as listed: the
+// link's secret is never part of it.
+type InviteeShown struct {
+	Name         string `json:"name,omitempty"`
+	Email        string `json:"email"`
+	Organisation string `json:"organisation,omitempty"`
 }
 
 // Invitation lifetimes.
@@ -628,13 +641,24 @@ func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
 	if !p.Can(auth.PermMembers) {
 		return nil, fmt.Errorf("%s may not manage members", p.Acting)
 	}
-	rows, err := r.st.Query("SELECT * FROM `invites` WHERE tenant = " + store.Lit(p.Tenant))
+	var out []*Invite
+	err := r.st.Do(func(tx *store.Tx) error {
+		rows, err := tx.Query("SELECT * FROM `invites` WHERE tenant = " + store.Lit(p.Tenant))
+		if err != nil {
+			return err
+		}
+		out = make([]*Invite, 0, len(rows))
+		for _, row := range rows {
+			inv := r.decodeInvite(row)
+			if err := r.inviteeOf(tx, inv); err != nil {
+				return err
+			}
+			out = append(out, inv)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	out := make([]*Invite, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, r.decodeInvite(row))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt > out[j].CreatedAt })
 	return out, nil

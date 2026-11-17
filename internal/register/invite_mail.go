@@ -125,6 +125,25 @@ func (r *Register) openRecipient(tx *store.Tx, row store.Row) (InviteRecipient, 
 	return to, true, nil
 }
 
+// inviteeOf marks an emailed invitation, and while it is open shows who
+// it is for.
+func (r *Register) inviteeOf(tx *store.Tx, inv *Invite) error {
+	row, err := tx.QueryOne("SELECT * FROM `invite_recipients` WHERE id = " + store.Lit(inv.ID))
+	if err != nil || row == nil {
+		return err
+	}
+	inv.Emailed = true
+	if inv.Status != "open" {
+		return nil
+	}
+	to, readable, err := r.openRecipient(tx, row)
+	if err != nil || !readable {
+		return err
+	}
+	inv.To = &InviteeShown{Name: to.Name, Email: to.Email, Organisation: to.Organisation}
+	return nil
+}
+
 // InviteReminders lists the open invitations due a reminder.
 func (r *Register) InviteReminders() ([]InviteReminder, error) {
 	var out []InviteReminder
