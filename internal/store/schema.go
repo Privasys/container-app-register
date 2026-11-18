@@ -322,6 +322,15 @@ var baseTables = []tableDDL{
 		)`,
 	},
 	{
+		// The role an invitation into an organisation was issued under,
+		// when its inviter manages only some roles.
+		name: "invite_narrowed",
+		ddl: `CREATE TABLE ` + "`invite_narrowed`" + ` (
+			id VARCHAR(32) PRIMARY KEY,
+			role VARCHAR(64) NOT NULL
+		)`,
+	},
+	{
 		// The appointment record an invitation binds its person to.
 		name: "invite_appointments",
 		ddl: `CREATE TABLE ` + "`invite_appointments`" + ` (

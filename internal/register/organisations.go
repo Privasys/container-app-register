@@ -238,9 +238,10 @@ func (r *Register) SetOrganisationAdmin(p *auth.Principal, organisation, sub str
 
 // RecordOrganisation records an organisation that no source holds, from
 // the details its first invitation gives: one outside the jurisdiction of
-// the register's sources, for instance. Whoever manages members may.
+// the register's sources, for instance. Whoever manages the members of any
+// role may.
 func (r *Register) RecordOrganisation(p *auth.Principal, payload map[string]any) (string, *model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
+	if !p.ManagesSomeRole() {
 		return "", nil, fmt.Errorf("%s may not record organisations", p.Acting)
 	}
 	class, err := r.organisationClass()

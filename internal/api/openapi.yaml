@@ -250,7 +250,7 @@ paths:
   /api/v1/invites:
     get:
       tags: [Membership]
-      summary: Invitations, without their secrets
+      summary: Invitations, without their secrets; to someone holding members:<role>, the invitations to those roles
       responses:
         "200":
           description: OK. An emailed invitation carries emailed true; while it is open it also carries to {name, email, organisation}, opened from the sealed recipient. Once it is used, withdrawn or expired the recipient is destroyed and to is absent.

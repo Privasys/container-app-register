@@ -241,6 +241,29 @@ the inviter's scope: here, a fleet manager invites the drivers of a fleet
 it manages. Outside its scope, or to another role, the
 invitation is refused.
 
+### Managing the members of some roles
+
+The `members` permission manages every role. Narrowed to a role,
+`members:<role>`, it manages that role only, under the role that carries
+it; `members:*` reaches every role, and so also the roles that manage
+members:
+
+```json
+{ "name": "licensing_clerk", "permissions": ["read:*", "members:dealer", "members:inspector"] }
+```
+
+For a role it manages, the holder may invite someone, by link or by email;
+list and withdraw the invitations to it; list who holds it
+(`GET /api/v1/members` shows those grants only); take it from a person or an
+organisation, saying why; and record an organisation. An invitation into an
+organisation is refused unless the holder manages every role the organisation
+holds, and it stops being valid if the organisation takes on another role
+before it is accepted. Granting a role directly, invitations to an
+appointment, wallet bindings, unbinding an appointment and removing a person
+from an organisation stay with the bare `members` permission or the
+organisation's administrator. A pack that names an undeclared role here does
+not load.
+
 ### How a role is held
 
 `held` says where a role comes from: `person` (the default), granted to

@@ -28,6 +28,9 @@ const (
 	PermMembers     = "members"     // grant and revoke roles, invite people
 )
 
+// membersOn is the prefix of the members permission narrowed to a role.
+const membersOn = PermMembers + ":"
+
 // RoleSpec is one role in a register's role model, declared by the
 // schema pack.
 type RoleSpec struct {
@@ -61,6 +64,19 @@ type RoleSpec struct {
 	HistoryActors bool `json:"history_actors,omitempty"`
 }
 
+// Manages says whether the role carries the management of another role's
+// members: the bare permission, or the permission narrowed to that role or
+// to every role. No role is named by an invitation that only brings a
+// colleague into an organisation, and only the bare permission covers it.
+func (s *RoleSpec) Manages(role string) bool {
+	for _, perm := range s.Permissions {
+		if perm == PermMembers || (role != "" && (perm == membersOn+"*" || perm == membersOn+role)) {
+			return true
+		}
+	}
+	return false
+}
+
 // Model is a register's whole role model.
 type Model struct {
 	roles  map[string]*RoleSpec
@@ -88,6 +104,13 @@ func NewModel(specs []RoleSpec) (*Model, error) {
 		for _, other := range s.IncompatibleWith {
 			if _, ok := m.roles[other]; !ok {
 				return nil, fmt.Errorf("roles: %q is declared incompatible with unknown role %q", s.Name, other)
+			}
+		}
+		for _, perm := range s.Permissions {
+			if named, ok := strings.CutPrefix(perm, membersOn); ok && named != "*" {
+				if _, known := m.roles[named]; !known {
+					return nil, fmt.Errorf("roles: %q manages the members of unknown role %q", s.Name, named)
+				}
 			}
 		}
 	}
@@ -124,6 +147,9 @@ type Principal struct {
 	Approval *Approval `json:"-"`
 
 	perms map[string]bool
+	// acting is the role the caller acts under: a narrowed members
+	// permission counts only under the role that carries it.
+	acting *RoleSpec
 }
 
 // ErrNoRole is returned for a caller who is who they say they are and
@@ -175,7 +201,7 @@ func (m *Model) Resolve(id *Identity, tenant, requestedRole string) (*Principal,
 	p := &Principal{
 		Sub: id.Sub, Display: id.Display, Email: id.Email,
 		Tenant: tenant, Roles: names, Acting: acting,
-		perms: map[string]bool{},
+		perms: map[string]bool{}, acting: m.roles[acting],
 	}
 	if p.Display == "" {
 		p.Display = id.Sub
@@ -212,6 +238,29 @@ func (p *Principal) Grant(perms ...string) {
 // scope, e.g. CanOn("propose", "ownership_transfer").
 func (p *Principal) CanOn(perm, scope string) bool {
 	return p.perms[perm] || p.perms[perm+":*"] || p.perms[perm+":"+scope]
+}
+
+// ManagesRole says whether the principal may manage the members of a role:
+// with the bare permission, from any role held, or with the permission
+// narrowed to that role, under the role that carries it.
+func (p *Principal) ManagesRole(role string) bool {
+	return p.Can(PermMembers) || (p.acting != nil && p.acting.Manages(role))
+}
+
+// ManagesSomeRole says whether the principal may manage the members of at
+// least one role.
+func (p *Principal) ManagesSomeRole() bool {
+	if p.Can(PermMembers) {
+		return true
+	}
+	if p.acting != nil {
+		for _, perm := range p.acting.Permissions {
+			if strings.HasPrefix(perm, membersOn) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Permissions lists the principal's permissions in a stable order.

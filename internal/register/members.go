@@ -126,9 +126,10 @@ func (r *Register) MembersRole() (string, error) {
 	return "", fmt.Errorf("pack %s declares no role with the %q permission", r.pk.Name, auth.PermMembers)
 }
 
-// Members lists every grant.
+// Members lists every grant; to someone who manages only some roles, the
+// grants of those roles.
 func (r *Register) Members(p *auth.Principal) ([]Member, error) {
-	if !p.Can(auth.PermMembers) {
+	if !p.ManagesSomeRole() {
 		return nil, fmt.Errorf("%s may not manage members", p.Acting)
 	}
 	rows, err := r.st.Query("SELECT sub, role, display, granted_by, granted_at, txid FROM `members` " +
@@ -170,6 +171,7 @@ func (r *Register) Members(p *auth.Principal) ([]Member, error) {
 			Appointment: &AppointmentRef{Class: h.Class, Key: h.Key},
 		})
 	}
+	out = slices.DeleteFunc(out, func(m Member) bool { return !p.ManagesRole(m.Role) })
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Sub != out[j].Sub {
 			return out[i].Sub < out[j].Sub
@@ -275,8 +277,11 @@ func (r *Register) grant(tx *store.Tx, kind string, author model.Author, tenant,
 
 // RevokeRole takes a role away from a subject.
 func (r *Register) RevokeRole(p *auth.Principal, sub, role, reason string) (*model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
+	if !p.ManagesRole(role) {
+		return nil, fmt.Errorf("%s may not manage the members of %s", p.Acting, role)
+	}
+	if !p.Can(auth.PermMembers) && strings.TrimSpace(reason) == "" {
+		return nil, fmt.Errorf("say why the role is withdrawn")
 	}
 	var txn *model.Transaction
 	err := r.st.Do(func(tx *store.Tx) error {
@@ -358,8 +363,10 @@ type InviteRequest struct {
 }
 
 // Invite issues an invitation. Whoever manages the register's members may
-// invite anyone to any role. An organisation's administrator may invite a
-// colleague into their own organisation, to a role they hold themselves.
+// invite anyone to any role. Whoever manages the members of one role may
+// invite to that role, into no organisation or into one holding only roles
+// they manage. An organisation's administrator may invite a colleague into
+// their own organisation, to a role they hold themselves.
 // The first person invited into an organisation will administer it.
 func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string, error) {
 	if req.To != nil && (len([]rune(req.To.Name)) > 128 || len([]rune(req.To.Organisation)) > 128) {
@@ -399,7 +406,14 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 			}
 			org = &inviteOrganisation{key: req.Organisation, admin: len(affiliates) == 0}
 		}
-		if !p.Can(auth.PermMembers) {
+		narrowed, err := r.invitesNarrowed(tx, p, req.Role, org)
+		if err != nil {
+			return err
+		}
+		if narrowed && org != nil {
+			org.issuedUnder = p.Acting
+		}
+		if !p.Can(auth.PermMembers) && !narrowed {
 			// An organisation's administrator invites colleagues into the
 			// organisation, where they inherit its roles. Personal roles
 			// are granted by whoever manages members.
@@ -439,11 +453,28 @@ func (r *Register) Invite(p *auth.Principal, req InviteRequest) (*Invite, string
 				return err
 			}
 		}
-		var err error
 		inv, secret, err = r.createInvite(tx, principalAuthor(p), p.Tenant, req.Role, req.Label, req.ValidFor, req.To, org, nil)
 		return err
 	})
 	return inv, secret, err
+}
+
+// invitesNarrowed says whether the caller invites to role by managing that
+// role alone: into no organisation, or into one all of whose roles they
+// manage, so that nobody is brought into an organisation whose roles are
+// someone else's to give.
+func (r *Register) invitesNarrowed(tx *store.Tx, p *auth.Principal, role string, org *inviteOrganisation) (bool, error) {
+	if p.Can(auth.PermMembers) || role == "" || !p.ManagesRole(role) {
+		return false, nil
+	}
+	if org == nil {
+		return true, nil
+	}
+	held, err := r.organisationRolesIn(tx, p.Tenant, org.key)
+	if err != nil {
+		return false, err
+	}
+	return !slices.ContainsFunc(held, func(h string) bool { return !p.ManagesRole(h) }), nil
 }
 
 // invitesThrough says whether a pack's invitation rule lets the caller
@@ -580,6 +611,12 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 			Table: "invite_organisations", Key: map[string]any{"id": inv.ID},
 			Values: map[string]any{"organisation": org.key, "admin": org.admin},
 		})
+		if org.issuedUnder != "" {
+			ops = append(ops, model.WriteOp{
+				Table: "invite_narrowed", Key: map[string]any{"id": inv.ID},
+				Values: map[string]any{"role": org.issuedUnder},
+			})
+		}
 	}
 	if appt != nil {
 		inv.AppointmentClass, inv.Appointment = appt.class, appt.key
@@ -607,6 +644,27 @@ func (r *Register) createInvite(tx *store.Tx, author model.Author, tenant, role,
 type inviteOrganisation struct {
 	key   string
 	admin bool
+	// issuedUnder is the role of an inviter who manages only some roles.
+	issuedUnder string
+}
+
+// narrowedInviteStands checks an invitation issued by someone who manages
+// only some roles against the organisation as it is now: one that has since
+// taken on a role they do not manage is no longer theirs to bring anyone into.
+func (r *Register) narrowedInviteStands(tx *store.Tx, tenant string, inv *Invite) (bool, error) {
+	row, err := tx.QueryOne("SELECT role FROM `invite_narrowed` WHERE id = " + store.Lit(inv.ID))
+	if err != nil || row == nil {
+		return err == nil, err
+	}
+	spec := r.pk.Model().Role(row.Str("role"))
+	if spec == nil || !spec.Manages(inv.Role) {
+		return false, nil
+	}
+	held, err := r.organisationRolesIn(tx, tenant, inv.Organisation)
+	if err != nil {
+		return false, err
+	}
+	return !slices.ContainsFunc(held, func(h string) bool { return !spec.Manages(h) }), nil
 }
 
 func (r *Register) inviteOrganisationOf(tx *store.Tx, inv *Invite) error {
@@ -635,10 +693,11 @@ func (r *Register) decodeInvite(row store.Row) *Invite {
 	return inv
 }
 
-// Invites lists invitations, newest first. Neither the secret nor its
-// hash is served.
+// Invites lists invitations, newest first; to someone who manages only some
+// roles, the invitations to those roles. Neither the secret nor its hash is
+// served.
 func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
-	if !p.Can(auth.PermMembers) {
+	if !p.ManagesSomeRole() {
 		return nil, fmt.Errorf("%s may not manage members", p.Acting)
 	}
 	var out []*Invite
@@ -649,6 +708,9 @@ func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
 		}
 		out = make([]*Invite, 0, len(rows))
 		for _, row := range rows {
+			if !p.ManagesRole(row.Str("role")) {
+				continue
+			}
 			inv := r.decodeInvite(row)
 			if err := r.inviteeOf(tx, inv); err != nil {
 				return err
@@ -666,7 +728,7 @@ func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
 
 // RevokeInvite withdraws an invitation nobody has used.
 func (r *Register) RevokeInvite(p *auth.Principal, id string) (*model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
+	if !p.ManagesSomeRole() {
 		return nil, fmt.Errorf("%s may not manage members", p.Acting)
 	}
 	var txn *model.Transaction
@@ -678,6 +740,9 @@ func (r *Register) RevokeInvite(p *auth.Principal, id string) (*model.Transactio
 		}
 		if row == nil {
 			return fmt.Errorf("no such invitation")
+		}
+		if !p.ManagesRole(row.Str("role")) {
+			return fmt.Errorf("%s may not withdraw this invitation", p.Acting)
 		}
 		inv := r.decodeInvite(row)
 		if inv.Status != "open" {
@@ -727,6 +792,11 @@ func (r *Register) openInvite(tx *store.Tx, tenant, id, secret string) (*Invite,
 	}
 	if err := r.inviteOrganisationOf(tx, inv); err != nil {
 		return nil, err
+	}
+	if stands, err := r.narrowedInviteStands(tx, tenant, inv); err != nil {
+		return nil, err
+	} else if !stands {
+		return nil, ErrInvite
 	}
 	if err := r.inviteAppointmentOf(tx, inv); err != nil {
 		return nil, err

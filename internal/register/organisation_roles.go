@@ -134,10 +134,10 @@ func (r *Register) OrganisationRoles(tenant, organisation string) ([]string, err
 }
 
 // WithdrawOrganisationRole takes a role from an organisation, and so from
-// every one of its members at once. Whoever manages members may.
+// every one of its members at once. Whoever manages the role's members may.
 func (r *Register) WithdrawOrganisationRole(p *auth.Principal, organisation, role, reason string) (*model.Transaction, error) {
-	if !p.Can(auth.PermMembers) {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
+	if !p.ManagesRole(role) {
+		return nil, fmt.Errorf("%s may not manage the members of %s", p.Acting, role)
 	}
 	if reason == "" {
 		return nil, fmt.Errorf("say why the role is withdrawn")
