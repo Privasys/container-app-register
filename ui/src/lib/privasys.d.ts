@@ -65,6 +65,11 @@ export interface AuthFrame {
     getTokenForAudience(audience: string): Promise<string>;
     /** Mounts the persistent session frame (idempotent once mounted) and
      *  returns the restored session, or null when there is none. */
+    /** Links a Privasys ID to a person signed in another way: opens the
+     *  wallet in a modal and resolves with an ID token for the server to
+     *  verify against this nonce. The current session stands. Needs a
+     *  clientId, and a click. */
+    linkIdentity(nonce: string): Promise<{ idToken: string }>;
     getSession(): Promise<{ token: string } | null>;
     clearSession(): Promise<void>;
     cancel(): void;
