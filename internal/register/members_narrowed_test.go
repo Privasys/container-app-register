@@ -93,8 +93,6 @@ func TestANarrowedPermissionNeedsItsRole(t *testing.T) {
 	both := h.principal("clerk-1", "police", "desk_clerk")
 	_, _, err := h.reg.Invite(both, register.InviteRequest{Role: "insurer"})
 	refused(t, "acting under another role", err)
-	_, err = h.reg.Invites(both)
-	refused(t, "listing under another role", err)
 }
 
 // An organisation that takes on another role after the invitation was issued
@@ -126,27 +124,31 @@ func TestAClerkSeesAndWithdrawsOnlyItsOwnRoles(t *testing.T) {
 	operator := h.principal("operator-1", "operator")
 	clerk := h.principal("clerk-1", "desk_clerk")
 	h.tick()
-	mine, _, err := h.reg.CreateEmailedInvite(operator, "insurer", 0, register.InviteRecipient{Email: "mine@example.invalid"})
+	mine, _, err := h.reg.Invite(clerk, register.InviteRequest{Role: "insurer",
+		To: &register.InviteRecipient{Email: "mine@example.invalid"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	h.tick()
-	other, _, err := h.reg.CreateInvite(operator, "registrar", "", 0)
+	other, _, err := h.reg.CreateInvite(operator, "insurer", "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Each party sees and withdraws the invitations it issued, even to a
+	// role both manage.
 	listed, err := h.reg.Invites(clerk)
-	if err != nil || len(listed) != 1 || listed[0].ID != mine.ID || listed[0].To == nil || listed[0].To.Email != "mine@example.invalid" {
+	if err != nil || len(listed) != 1 || listed[0].ID != mine.ID || listed[0].IssuedUnder != "desk_clerk" ||
+		listed[0].To == nil || listed[0].To.Email != "mine@example.invalid" {
 		t.Fatalf("the clerk lists %+v %v", listed, err)
 	}
 	h.tick()
 	_, err = h.reg.RevokeInvite(clerk, other.ID)
-	refused(t, "withdrawing another role's invitation", err)
+	refused(t, "withdrawing another party's invitation", err)
 	if _, err := h.reg.RevokeInvite(clerk, mine.ID); err != nil {
 		t.Errorf("withdrawing its own: %v", err)
 	}
-	if all, _ := h.reg.Invites(operator); len(all) != 2 {
-		t.Errorf("the administrator lists %d invitations", len(all))
+	if all, _ := h.reg.Invites(operator); len(all) != 1 || all[0].ID != other.ID {
+		t.Errorf("the administrator lists %+v", all)
 	}
 
 	// Who holds a role, and taking it away with a reason.

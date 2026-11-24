@@ -253,7 +253,7 @@ members:
 ```
 
 For a role it manages, the holder may invite someone, by link or by email;
-list and withdraw the invitations to it; list who holds it
+list and withdraw the invitations it issued; list who holds it
 (`GET /api/v1/members` shows those grants only); take it from a person or an
 organisation, saying why; and record an organisation. An invitation into an
 organisation is refused unless the holder manages every role the organisation
@@ -263,6 +263,32 @@ appointment, wallet bindings, unbinding an appointment and removing a person
 from an organisation stay with the bare `members` permission or the
 organisation's administrator. A pack that names an undeclared role here does
 not load.
+
+### Who sees an invitation
+
+Each party sees the invitations it issued, and only those.
+`GET /api/v1/invites` lists, and `DELETE /api/v1/invites/{id}` withdraws,
+the invitations issued under the role the caller acts in: a fleet operator
+sees what fleet operators issued, whoever it was for. An organisation's
+administrator also sees and withdraws the invitations its own people issued
+into the organisation, a fellow administrator's included; an invitation the
+operator issued into the fleet stays the operator's. The issuing role is the
+author's role on the invitation's transaction, so this covers invitations
+issued before the rule.
+
+A role with the `invitations` permission lists every invitation of the
+register, and withdraws none: oversight of who is being let in. Who an open
+invitation is for, and the name of who used one, are shown to such a role
+only when it is cleared for personal data (`pii`). The invitations the
+register issued itself, such as the first administrator's, are listed to
+oversight only.
+
+Each invitation carries `issued_under` (the role, or `system`), its
+`organisation` and `organisation_admin`, and while it is open the
+`organisation_roles` the organisation holds, which joining gives; a used
+one carries `used_by_display`, the recorded name of who used it.
+`GET /api/v1/organisations/{key}/members` carries each person's recorded
+name as `display`.
 
 ### How a role is held
 

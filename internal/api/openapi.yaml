@@ -250,10 +250,10 @@ paths:
   /api/v1/invites:
     get:
       tags: [Membership]
-      summary: Invitations, without their secrets; to someone holding members:<role>, the invitations to those roles
+      summary: The invitations the caller's party issued (under the role it acts in, or, for an organisation's administrator, by the organisation's own people into it); every invitation, read only, with the invitations permission
       responses:
         "200":
-          description: OK. An emailed invitation carries emailed true; while it is open it also carries to {name, email, organisation}, opened from the sealed recipient. Once it is used, withdrawn or expired the recipient is destroyed and to is absent.
+          description: OK. Each carries issued_under, its organisation, and while open the organisation_roles joining gives; a used one carries used_by_display. An emailed invitation carries emailed true; while it is open it also carries to {name, email, organisation}, opened from the sealed recipient, shown to the issuing party and to an overseer cleared for personal data. Once it is used, withdrawn or expired the recipient is destroyed and to is absent.
     post:
       tags: [Membership]
       summary: Issue a single-use invitation; the link is returned once

@@ -26,6 +26,9 @@ const (
 	PermKeys        = "keys"        // enrol customer key-encryption keys
 	PermAdmin       = "admin"       // webhooks, export, standby control
 	PermMembers     = "members"     // grant and revoke roles, invite people
+	// PermInvitations lists every invitation, whoever issued it, and
+	// withdraws none: oversight of who is being let in.
+	PermInvitations = "invitations"
 )
 
 // membersOn is the prefix of the members permission narrowed to a role.

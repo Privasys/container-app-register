@@ -69,6 +69,14 @@ type Invite struct {
 	// it is finished the recipient is destroyed and To is absent.
 	Emailed bool          `json:"emailed,omitempty"`
 	To      *InviteeShown `json:"to,omitempty"`
+	// IssuedUnder is the role the invitation was issued under; "system"
+	// for one the register issued itself.
+	IssuedUnder string `json:"issued_under,omitempty"`
+	// OrganisationRoles are the roles the organisation holds while the
+	// invitation is open: what joining it gives, besides Role.
+	OrganisationRoles []string `json:"organisation_roles,omitempty"`
+	// UsedByDisplay is the recorded name of the person who used it.
+	UsedByDisplay string `json:"used_by_display,omitempty"`
 }
 
 // InviteeShown is who an open emailed invitation is for, as listed: the
@@ -477,6 +485,35 @@ func (r *Register) invitesNarrowed(tx *store.Tx, p *auth.Principal, role string,
 	return !slices.ContainsFunc(held, func(h string) bool { return !p.ManagesRole(h) }), nil
 }
 
+// issuedByParty says whether the caller's party issued an invitation: it
+// was issued under the role the caller acts in, or the caller administers
+// the organisation it brings its person into and the person who issued it
+// belongs to that organisation. The role is the issuing transaction's
+// author's, so invitations issued before this rule are covered too. It
+// fills inv.IssuedUnder.
+func (r *Register) issuedByParty(tx *store.Tx, p *auth.Principal, row store.Row, inv *Invite) (bool, error) {
+	issued, err := tx.QueryOne("SELECT author_role FROM `transactions` WHERE txid = " + store.Lit(row.Str("txid")))
+	if err != nil {
+		return false, err
+	}
+	if issued != nil {
+		inv.IssuedUnder = issued.Str("author_role")
+	}
+	if inv.IssuedUnder != "" && inv.IssuedUnder == p.Acting {
+		return true, nil
+	}
+	if inv.Organisation == "" {
+		return false, nil
+	}
+	admin, err := r.isOrganisationAdmin(tx, p.Tenant, p.Sub, inv.Organisation)
+	if err != nil || !admin {
+		return false, err
+	}
+	member, err := tx.QueryOne("SELECT sub FROM `affiliations` WHERE tenant = " + store.Lit(p.Tenant) +
+		" AND sub = " + store.Lit(inv.CreatedBy) + " AND organisation = " + store.Lit(inv.Organisation))
+	return member != nil, err
+}
+
 // invitesThrough says whether a pack's invitation rule lets the caller
 // invite to role into the organisation keyed key: the rule names the
 // caller's acting role and the role, and the record of the rule's class
@@ -693,27 +730,52 @@ func (r *Register) decodeInvite(row store.Row) *Invite {
 	return inv
 }
 
-// Invites lists invitations, newest first; to someone who manages only some
-// roles, the invitations to those roles. Neither the secret nor its hash is
-// served.
+// Invites lists, newest first, the invitations the caller's party issued:
+// those issued under the role they act in, and, for an organisation's
+// administrator, those issued into the organisation by its own people. With
+// the invitations permission, every invitation, to read. Neither the secret
+// nor its hash is served; who an open invitation is for, and who used one,
+// are shown to the party that issued it, and to an overseer cleared for
+// personal data.
 func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
-	if !p.ManagesSomeRole() {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
+	names, err := r.profileNames()
+	if err != nil {
+		return nil, err
 	}
 	var out []*Invite
-	err := r.st.Do(func(tx *store.Tx) error {
+	err = r.st.Do(func(tx *store.Tx) error {
 		rows, err := tx.Query("SELECT * FROM `invites` WHERE tenant = " + store.Lit(p.Tenant))
 		if err != nil {
 			return err
 		}
 		out = make([]*Invite, 0, len(rows))
 		for _, row := range rows {
-			if !p.ManagesRole(row.Str("role")) {
+			inv := r.decodeInvite(row)
+			if err := r.inviteOrganisationOf(tx, inv); err != nil {
+				return err
+			}
+			if err := r.inviteAppointmentOf(tx, inv); err != nil {
+				return err
+			}
+			ours, err := r.issuedByParty(tx, p, row, inv)
+			if err != nil {
+				return err
+			}
+			if !ours && !p.Can(auth.PermInvitations) {
 				continue
 			}
-			inv := r.decodeInvite(row)
 			if err := r.inviteeOf(tx, inv); err != nil {
 				return err
+			}
+			if inv.Organisation != "" && inv.Status == "open" {
+				if inv.OrganisationRoles, err = r.organisationRolesIn(tx, p.Tenant, inv.Organisation); err != nil {
+					return err
+				}
+			}
+			if ours || p.PII {
+				inv.UsedByDisplay = names[inv.UsedBy]
+			} else {
+				inv.To = nil
 			}
 			out = append(out, inv)
 		}
@@ -728,9 +790,6 @@ func (r *Register) Invites(p *auth.Principal) ([]*Invite, error) {
 
 // RevokeInvite withdraws an invitation nobody has used.
 func (r *Register) RevokeInvite(p *auth.Principal, id string) (*model.Transaction, error) {
-	if !p.ManagesSomeRole() {
-		return nil, fmt.Errorf("%s may not manage members", p.Acting)
-	}
 	var txn *model.Transaction
 	err := r.st.Do(func(tx *store.Tx) error {
 		row, err := tx.QueryOne("SELECT * FROM `invites` WHERE id = " + store.Lit(id) +
@@ -741,10 +800,15 @@ func (r *Register) RevokeInvite(p *auth.Principal, id string) (*model.Transactio
 		if row == nil {
 			return fmt.Errorf("no such invitation")
 		}
-		if !p.ManagesRole(row.Str("role")) {
-			return fmt.Errorf("%s may not withdraw this invitation", p.Acting)
-		}
 		inv := r.decodeInvite(row)
+		if err := r.inviteOrganisationOf(tx, inv); err != nil {
+			return err
+		}
+		if ours, err := r.issuedByParty(tx, p, row, inv); err != nil {
+			return err
+		} else if !ours {
+			return fmt.Errorf("%s may not withdraw this invitation: another party issued it", p.Acting)
+		}
 		if inv.Status != "open" {
 			return fmt.Errorf("invitation %s is not awaiting anyone: it is %s", id, inv.Status)
 		}

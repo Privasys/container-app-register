@@ -148,13 +148,19 @@ func (r *Register) affiliatesIn(tx *store.Tx, tenant, organisation string) ([]Af
 type OrganisationMember struct {
 	Affiliation
 	Roles []string `json:"roles"`
+	// Display is the person's recorded name.
+	Display string `json:"display,omitempty"`
 }
 
 // OrganisationMembers lists the people of an organisation, for its own
 // administrators and for whoever manages the register's members.
 func (r *Register) OrganisationMembers(p *auth.Principal, organisation string) ([]OrganisationMember, error) {
+	names, err := r.profileNames()
+	if err != nil {
+		return nil, err
+	}
 	var out []OrganisationMember
-	err := r.st.Do(func(tx *store.Tx) error {
+	err = r.st.Do(func(tx *store.Tx) error {
 		if err := r.mayAdminister(tx, p, organisation); err != nil {
 			return err
 		}
@@ -167,7 +173,7 @@ func (r *Register) OrganisationMembers(p *auth.Principal, organisation string) (
 			if err != nil {
 				return err
 			}
-			out = append(out, OrganisationMember{Affiliation: a, Roles: roles})
+			out = append(out, OrganisationMember{Affiliation: a, Roles: roles, Display: names[a.Sub]})
 		}
 		return nil
 	})
