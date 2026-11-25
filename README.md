@@ -187,7 +187,7 @@ to sign in, so the console offers stand-in personas instead.
 | `PRIVASYS_APP_ID` | Set by the platform runtime: the app's identifier. The page asks the identity provider for a token whose audience is this app (`app:<id>`), which is what the runtime accepts on a direct name. |
 | `REGISTER_SIGNIN_PROVIDERS` | On a direct adopter name, which federated identities the sign-in gate offers, comma-separated and in order (`github`, `google`, `microsoft`, `linkedin`). Empty offers every provider the identity provider has. An adopter whose people all use one work identity sets the one, e.g. `microsoft`. |
 | `REGISTER_OIDC_ISSUER` | Identity provider for bearer tokens. Default `https://privasys.id`. |
-| `REGISTER_OIDC_AUDIENCE` | The audience bearer tokens must carry. |
+| `REGISTER_OIDC_AUDIENCE` | The audience bearer tokens must carry. On the platform it defaults to the app itself, `app:<id>` from `PRIVASYS_APP_ID`; elsewhere it is required unless `REGISTER_DEV_AUTH` is set. A bearer token must also be an access token (`typ` claim `at+jwt`) and carry an expiry. |
 | `REGISTER_CHECKPOINT_INTERVAL` | Cadence for scheduled checkpoints. Default `24h`. |
 | `REGISTER_MODE` | `active` or `standby`. |
 | `REGISTER_PRIMARY_URL` | The active register a standby follows. |

@@ -165,6 +165,18 @@ func Load() (*Config, error) {
 	}
 	c.SelfConfigure = truthy(os.Getenv("REGISTER_SELF_CONFIGURE")) || c.Mode == ModeStandby
 
+	// Bearer tokens are for this app and no other. On the platform the app
+	// is its own audience, the one the page asks for; anywhere else it must
+	// be named. Only development, which verifies nothing, goes without.
+	if c.Audience == "" && c.OnPlatform() {
+		if id := AppIDHex(c.AppID); id != "" {
+			c.Audience = "app:" + id
+		}
+	}
+	if c.Audience == "" && !c.DevAuth {
+		return nil, errors.New("config: no audience for bearer tokens: set REGISTER_OIDC_AUDIENCE, or run on the platform with PRIVASYS_APP_ID")
+	}
+
 	switch c.Mode {
 	case ModeActive:
 	case ModeStandby:
