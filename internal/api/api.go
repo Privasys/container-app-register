@@ -454,6 +454,23 @@ func (s *Server) identify(r *http.Request, reg *register.Register, verifier auth
 		if id, err = verifier.Verify(r.Context(), strings.TrimPrefix(header, "Bearer ")); err != nil {
 			return nil, "", err
 		}
+		// A bearer sign-in is a sign-in too: the register records it as it
+		// records the runtime's, keeping an address only when the token
+		// says it was proved.
+		email, name := "", id.Display
+		if id.Claims != nil {
+			name, _ = id.Claims["name"].(string)
+			if proved, _ := id.Claims["email_verified"].(bool); proved {
+				email, _ = id.Claims["email"].(string)
+			}
+		}
+		profile, err := reg.SeeIdentity(id.Sub, email, name)
+		if err != nil {
+			return nil, "", fmt.Errorf("identity lookup: %w", err)
+		}
+		if id.Display == "" {
+			id.Display = profile.Name
+		}
 	}
 	tenant := r.Header.Get("X-Register-Tenant")
 	if tenant == "" {

@@ -123,7 +123,9 @@ func (r *Register) SeeIdentity(sub, email, name string) (Profile, error) {
 		if held, err = r.profileIn(tx, sub); err != nil {
 			return err
 		}
-		changed := (email != "" && email != held.Email) || (name != "" && name != held.Name)
+		// A first sign-in is recorded even when it asserts nothing: it is
+		// what says the person has signed in to this register at all.
+		changed := held.FirstSeen == 0 || (email != "" && email != held.Email) || (name != "" && name != held.Name)
 		if !changed || held.Erased {
 			return nil
 		}
