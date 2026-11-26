@@ -313,17 +313,58 @@ func (r *Register) inOneScope(tx *store.Tx, p *auth.Principal, scope *pack.Scope
 		keys, err := r.scopeKeys(tx, p)
 		return slices.Contains(keys, value), err
 	}
-	via := r.pk.Class(scope.Via)
-	row, err := tx.QueryOne("SELECT id FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +
-		" AND class = " + store.Lit(via.Name) + " AND natural_key = " + store.Lit(value))
-	if err != nil || row == nil {
-		return false, err
-	}
-	head, err := r.headVersion(tx, via, row.Str("id"))
+	links, err := r.viaLinks(tx, p.Tenant, scope, value)
 	if err != nil {
 		return false, err
 	}
-	return r.inScope(tx, p, via, head.Payload)
+	via := r.pk.Class(scope.Via)
+	for _, l := range links {
+		head, err := r.headVersion(tx, via, l.id)
+		if err != nil {
+			return false, err
+		}
+		if ok, err := r.inScope(tx, p, via, head.Payload); ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
+}
+
+// viaLink is a record of a scope's Via class, with the value it links by:
+// its natural key, or its via_property.
+type viaLink struct {
+	id, value string
+}
+
+// viaLinks reads the records of a scope's Via class that may bring a record
+// into scope: those linking by value, or every one when value is "". With
+// via_current, only those in their class's initial status, not erased.
+func (r *Register) viaLinks(tx *store.Tx, tenant string, scope *pack.Scope, value string) ([]viaLink, error) {
+	via := r.pk.Class(scope.Via)
+	link := "o.natural_key"
+	q := "SELECT o.id AS id, o.natural_key AS link FROM `objects` o"
+	if scope.ViaProperty != "" {
+		link = "q." + store.Ident(scope.ViaColumn(via))
+		q = "SELECT o.id AS id, " + link + " AS link FROM `objects` o JOIN " + store.Ident(via.QueryTable()) + " q ON q.object_id = o.id"
+	}
+	q += " WHERE o.tenant = " + store.Lit(tenant) + " AND o.class = " + store.Lit(via.Name)
+	if value != "" {
+		q += " AND " + link + " = " + store.Lit(value)
+	}
+	if scope.ViaCurrent {
+		q += " AND o.status = " + store.Lit(via.Initial) + " AND o.erased = false"
+	}
+	rows, err := tx.Query(q)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]viaLink, 0, len(rows))
+	for _, row := range rows {
+		if v := row.Str("link"); v != "" {
+			out = append(out, viaLink{id: row.Str("id"), value: v})
+		}
+	}
+	return out, nil
 }
 
 // checkScope refuses a record outside the caller's scope.
@@ -376,13 +417,15 @@ func (r *Register) oneScopeClause(tx *store.Tx, p *auth.Principal, class *pack.C
 		allowed = keys
 	} else {
 		via := r.pk.Class(scope.Via)
-		rows, err := tx.Query("SELECT id, natural_key FROM `objects` WHERE tenant = " + store.Lit(p.Tenant) +
-			" AND class = " + store.Lit(via.Name))
+		links, err := r.viaLinks(tx, p.Tenant, scope, "")
 		if err != nil {
 			return "", err
 		}
-		for _, row := range rows {
-			head, err := r.headVersion(tx, via, row.Str("id"))
+		for _, l := range links {
+			if slices.Contains(allowed, l.value) {
+				continue
+			}
+			head, err := r.headVersion(tx, via, l.id)
 			if err != nil {
 				return "", err
 			}
@@ -391,7 +434,7 @@ func (r *Register) oneScopeClause(tx *store.Tx, p *auth.Principal, class *pack.C
 				return "", err
 			}
 			if ok {
-				allowed = append(allowed, row.Str("natural_key"))
+				allowed = append(allowed, l.value)
 			}
 		}
 	}

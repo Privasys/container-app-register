@@ -382,6 +382,37 @@ A pack whose scoped roles are all held by appointment needs no
 role, and the values of `keys`), and `GET /api/v1/members` lists each
 current holding with the `appointment` that gives it.
 
+### Scopes through another record
+
+A scope limits a role, in one class, to the records of the person's
+organisations: `property` holds an organisation's key. With `via`,
+`property` holds the natural key of a record of the `via` class, and the
+record is in scope when that one is, under its own class's scopes: a
+vehicle is in scope when its fleet is.
+
+```json
+{ "class": "vehicle", "roles": ["fleet_manager"], "property": "fleet_number", "via": "fleet" }
+```
+
+**A link record that names the record.** With `via_property`, the link
+runs the other way: a record of the `via` class whose `via_property`
+equals this record's `property`, and which is in scope under its own
+class's scopes, brings this record into scope. Several link records can
+name the same record over time. With `via_current: true`, only link
+records in their class's initial status count, so closing the link record
+ends the access at once. A repairer reads an asset while an open repair
+order of its firm names it:
+
+```json
+{ "class": "repair_order", "roles": ["repairer"], "property": "repairer" },
+{ "class": "asset", "roles": ["repairer"], "property": "asset_no",
+  "via": "repair_order", "via_property": "asset_no", "via_current": true }
+```
+
+`via_property` is a queryable (`x-register.queryable`) property of the
+`via` class that is not personal data. `via_property` and `via_current`
+need `via`, and `via_current` needs the `via` class to have statuses.
+
 ## Step-up: acts approved on a wallet
 
 A signed-in session says who is at the keyboard. For the acts that carry

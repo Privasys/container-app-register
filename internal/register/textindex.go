@@ -68,6 +68,9 @@ func (r *Register) classText(tenant, class string) *classText {
 			if s.Class == class {
 				ct.scopeCols[s.Property] = true
 			}
+			if s.Via == class && s.ViaProperty != "" {
+				ct.scopeCols[s.ViaColumn(r.pk.Class(class))] = true
+			}
 		}
 		r.text.classes[k] = ct
 	}
@@ -371,9 +374,20 @@ func (r *Register) scopeFilter(p *auth.Principal, class *pack.Class) (func(*text
 			vct.mu.Lock()
 			err = r.refreshText(vct, p.Tenant, via)
 			if err == nil {
+				col := ""
+				if scope.ViaProperty != "" {
+					col = scope.ViaColumn(via)
+				}
 				for _, row := range vct.rows {
-					if viaIn == nil || viaIn(row) {
-						allowed[row.raw] = true
+					if scope.ViaCurrent && row.status != via.Initial {
+						continue
+					}
+					link := row.raw
+					if col != "" {
+						link = row.scope[col]
+					}
+					if link != "" && (viaIn == nil || viaIn(row)) {
+						allowed[link] = true
 					}
 				}
 			}

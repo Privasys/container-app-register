@@ -27,11 +27,30 @@ type Organisations struct {
 // organisations. With Via, Property holds the natural key of a record of
 // another class, and that record must be in scope under the scopes of its
 // own class: a vehicle, for instance, is in scope when its fleet is.
+//
+// With ViaProperty, the link runs the other way: a record of class Via
+// whose ViaProperty equals this record's Property, and which is in scope
+// under its own class's scopes, brings this record into scope. A vehicle
+// is in scope for a repairer while a repair order in the repairer's scope
+// names it. ViaCurrent counts only the Via records in their class's
+// initial status, so ending the link record ends the access at once.
 type Scope struct {
-	Class    string   `json:"class"`
-	Roles    []string `json:"roles"`
-	Property string   `json:"property"`
-	Via      string   `json:"via,omitempty"`
+	Class       string   `json:"class"`
+	Roles       []string `json:"roles"`
+	Property    string   `json:"property"`
+	Via         string   `json:"via,omitempty"`
+	ViaProperty string   `json:"via_property,omitempty"`
+	ViaCurrent  bool     `json:"via_current,omitempty"`
+}
+
+// ViaColumn is the query column of the Via class that holds ViaProperty.
+func (s *Scope) ViaColumn(via *Class) string {
+	for _, p := range via.Compiled().Projections() {
+		if p.Property == s.ViaProperty && p.Member == "" {
+			return p.Column
+		}
+	}
+	return ""
 }
 
 func classProperties(c *Class) (map[string]json.RawMessage, error) {
@@ -81,6 +100,21 @@ func (p *Pack) validateScopes() error {
 			if via.Name == s.Class {
 				return fmt.Errorf("scope %d: a class cannot be scoped through itself", i)
 			}
+			if s.ViaProperty != "" {
+				if s.ViaColumn(via) == "" {
+					return fmt.Errorf("scope %d: %s.%s is not a queryable property", i, via.Name, s.ViaProperty)
+				}
+				for _, f := range via.Compiled().PIIFields() {
+					if f == s.ViaProperty {
+						return fmt.Errorf("scope %d: %s.%s is personal data, which no scope compares", i, via.Name, s.ViaProperty)
+					}
+				}
+			}
+			if s.ViaCurrent && (len(via.Statuses) == 0 || via.Initial == "") {
+				return fmt.Errorf("scope %d: via_current needs %s to have statuses", i, via.Name)
+			}
+		} else if s.ViaProperty != "" || s.ViaCurrent {
+			return fmt.Errorf("scope %d: via_property and via_current need via", i)
 		}
 		if len(s.Roles) == 0 {
 			return fmt.Errorf("scope %d: name the roles it limits", i)
