@@ -5,6 +5,7 @@ package pack
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 )
 
@@ -19,6 +20,9 @@ import (
 // and EndedBy, when named, holds no value. Keys name the properties whose
 // values a scope compares against when the person acts under the role, in
 // place of the keys of their organisations.
+//
+// HolderProperty, when named, lets a record name its holder: the subject it
+// holds is bound to the record as an accepted invitation would bind them.
 type Appointment struct {
 	Class        string            `json:"class"`
 	Role         string            `json:"role,omitempty"`
@@ -26,6 +30,9 @@ type Appointment struct {
 	Roles        map[string]string `json:"roles,omitempty"`
 	Keys         []string          `json:"keys,omitempty"`
 	EndedBy      string            `json:"ended_by,omitempty"`
+	// HolderProperty is a property holding the subject of the person the
+	// record appoints.
+	HolderProperty string `json:"holder_property,omitempty"`
 }
 
 // HeldByAppointment is how a role given by an appointment is declared.
@@ -74,6 +81,15 @@ func (p *Pack) validateAppointments() error {
 		if a.EndedBy != "" {
 			if _, ok := props[a.EndedBy]; !ok {
 				return fmt.Errorf("appointment %d: class %s has no property %q", i, a.Class, a.EndedBy)
+			}
+		}
+		if a.HolderProperty != "" {
+			if _, ok := props[a.HolderProperty]; !ok {
+				return fmt.Errorf("appointment %d: class %s has no property %q", i, a.Class, a.HolderProperty)
+			}
+			if a.HolderProperty == class.NaturalKey || a.HolderProperty == a.RoleProperty || a.HolderProperty == a.EndedBy ||
+				slices.Contains(a.Keys, a.HolderProperty) {
+				return fmt.Errorf("appointment %d: the holder property %q has another use", i, a.HolderProperty)
 			}
 		}
 	}

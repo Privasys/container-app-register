@@ -176,6 +176,7 @@ func (r *Register) Propose(p *auth.Principal, workflowName string, req ProposeRe
 		}
 
 		w := newWriteCtx(p.Tenant, at)
+		w.by = p.Sub
 		payloadJSON, keyOps, err := r.sealProposal(tx, w, r.proposalPII(wf, class), taskID, req.Payload)
 		if err != nil {
 			return err
@@ -557,7 +558,10 @@ func (r *Register) decide(tx *store.Tx, p *auth.Principal, wf *pack.Workflow, ta
 		return nil, nil, fmt.Errorf("cannot approve under policy: %s", strings.Join(blockers, "; "))
 	}
 
-	ops, objectID, err := r.effectOps(tx, newWriteCtx(p.Tenant, at), wf, task, ctx)
+	w := newWriteCtx(p.Tenant, at)
+	// What the act puts in place is in the name of whoever proposed it.
+	w.by = task.ProposerSub
+	ops, objectID, err := r.effectOps(tx, w, wf, task, ctx)
 	if err != nil {
 		return nil, nil, err
 	}

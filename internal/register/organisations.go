@@ -265,7 +265,9 @@ func (r *Register) RecordOrganisation(p *auth.Principal, payload map[string]any)
 	err = r.st.Do(func(tx *store.Tx) error {
 		at := r.now()
 		var ops []model.WriteOp
-		objectID, ops, err = r.createOps(tx, newWriteCtx(p.Tenant, at), class, payload, "")
+		w := newWriteCtx(p.Tenant, at)
+		w.by = p.Sub
+		objectID, ops, err = r.createOps(tx, w, class, payload, "")
 		if err != nil {
 			return err
 		}

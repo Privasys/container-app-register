@@ -154,10 +154,14 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 		delete(values, "created_tx")
 	}
 
+	previousKey := ""
 	if d.class.NaturalKey != "" {
-		if previous, err := r.previousNaturalKey(tx, d.objectID); err != nil {
+		previous, err := r.previousNaturalKey(tx, d.objectID)
+		if err != nil {
 			return nil, err
-		} else if previous != "" && previous != naturalKey {
+		}
+		previousKey = previous
+		if previous != "" && previous != naturalKey {
 			// A correction that changes the natural key retires the old
 			// one, so an absence proof for it says what it should: this
 			// key is not registered here now.
@@ -175,6 +179,12 @@ func (r *Register) buildRecordOps(tx *store.Tx, w *writeCtx, d recordDraft) ([]m
 			},
 		})
 	}
+
+	holderOps, err := r.namedHolderOps(tx, w, d, naturalKey, previousKey)
+	if err != nil {
+		return nil, err
+	}
+	ops = append(ops, holderOps...)
 
 	proj := r.projectionOps(d.class, w.tenant, d.objectID, d.status, w.at, stored.Clear)
 	ops = append(ops, proj)

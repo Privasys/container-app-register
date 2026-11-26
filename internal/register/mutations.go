@@ -27,6 +27,7 @@ import (
 type writeCtx struct {
 	tenant  string
 	at      int64
+	by      string            // who the write is for; a record naming its holder binds them in their name
 	pending map[string]string // object id → class
 }
 

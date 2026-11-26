@@ -186,6 +186,7 @@ func (r *Register) ImportFromSource(p *auth.Principal, name, key string, doc map
 		class := r.pk.Class(src.Class)
 		at := r.now()
 		w := newWriteCtx(p.Tenant, at)
+		w.by = p.Sub
 		var ops []model.WriteOp
 		verb := "Bring in"
 		if out.Held {

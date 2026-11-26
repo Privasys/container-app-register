@@ -39,12 +39,17 @@ type AppointmentHolding struct {
 	GrantedBy string            `json:"granted_by"`
 	Since     int64             `json:"since"`
 	TxID      string            `json:"txid,omitempty"`
+	// Named says the record itself names the holder: amending it is how the
+	// holding ends early, not unbinding.
+	Named bool `json:"named,omitempty"`
 }
 
 // AppointmentRef names an appointment record.
 type AppointmentRef struct {
 	Class string `json:"class"`
 	Key   string `json:"key"`
+	// Named says the record itself names its holder.
+	Named bool `json:"named,omitempty"`
 }
 
 func emptyValue(v any) bool {
@@ -113,6 +118,11 @@ func (r *Register) holdings(tx *store.Tx, tenant, sub string) ([]AppointmentHold
 		for _, k := range a.Keys {
 			if v := unwrap(payload[k]); !emptyValue(v) {
 				h.Keys[k] = fmt.Sprint(v)
+			}
+		}
+		if a.HolderProperty != "" {
+			if h.Named, err = r.namedHolding(tx, tenant, a.Class, h.Key); err != nil {
+				return nil, err
 			}
 		}
 		out = append(out, h)
@@ -325,6 +335,15 @@ func (r *Register) EndAppointmentHolding(p *auth.Principal, class, key, reason s
 		label := strings.ReplaceAll(class, "_", " ")
 		if row == nil {
 			return fmt.Errorf("nobody holds %s %s", label, key)
+		}
+		if named, err := r.namedHolding(tx, p.Tenant, class, key); err != nil {
+			return err
+		} else if named {
+			prop := ""
+			if a := r.pk.AppointmentOf(class); a != nil {
+				prop = " " + a.HolderProperty
+			}
+			return fmt.Errorf("%s %s names its holder itself: amend the record's%s to end the holding", label, key, prop)
 		}
 		if r.pk.StepUpRevoke(row.Str("role")) {
 			if err := r.stepUp(tx, p, "end_holding", map[string]any{"class": class, "key": key, "reason": reason},

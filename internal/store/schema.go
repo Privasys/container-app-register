@@ -360,6 +360,18 @@ var baseTables = []tableDDL{
 		},
 	},
 	{
+		// The appointment holdings a record put in place itself, by naming
+		// its holder, as opposed to an accepted invitation.
+		name: "appointment_named",
+		ddl: `CREATE TABLE ` + "`appointment_named`" + ` (
+			tenant VARCHAR(64) NOT NULL,
+			class VARCHAR(64) NOT NULL,
+			natural_key VARCHAR(191) NOT NULL,
+			since BIGINT NOT NULL,
+			PRIMARY KEY (tenant, class, natural_key)
+		)`,
+	},
+	{
 		// The wallets each member approves their acts on, one row each,
 		// like devices: a member may bind several, and any of them
 		// approves. A wallet serves one member.

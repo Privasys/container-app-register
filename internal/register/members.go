@@ -176,7 +176,7 @@ func (r *Register) Members(p *auth.Principal) ([]Member, error) {
 	for _, h := range held {
 		out = append(out, Member{
 			Sub: h.Sub, Role: h.Role, Display: names[h.Sub], GrantedBy: h.GrantedBy, GrantedAt: h.Since, TxID: h.TxID,
-			Appointment: &AppointmentRef{Class: h.Class, Key: h.Key},
+			Appointment: &AppointmentRef{Class: h.Class, Key: h.Key, Named: h.Named},
 		})
 	}
 	out = slices.DeleteFunc(out, func(m Member) bool { return !p.ManagesRole(m.Role) })

@@ -320,6 +320,7 @@ at their own firm inherit nothing:
 | `role_property`, `roles` | The property whose value names the role, and the role each value gives. |
 | `keys` | The properties a scope compares against when the person acts under the role. |
 | `ended_by` | Optional. A property that ends the appointment when it holds a value. |
+| `holder_property` | Optional. A property holding the subject of the person the record appoints: see **Naming the holder**. |
 
 Every role an appointment gives is declared `"held": "appointment"`.
 
@@ -347,6 +348,23 @@ transaction with a message, refused if the role would breach the
 person's `incompatible_with`. Whoever manages members may unbind the
 holder before the record ends, saying why:
 `DELETE /api/v1/appointments/{class}/{key}/holder?reason=…`.
+
+**Naming the holder.** When the person is already a member and their
+subject is known, the record can name them instead of an invitation. With
+`"holder_property": "holder"`, a record whose `holder` holds a subject binds
+that person in the commit that writes the record, as an accepted invitation
+would: the role, its lapse with the record and its scope by `keys` are the
+same, and `granted_by` is whoever proposed the record. Amending the record
+to name someone else moves the holding; clearing the property ends it. The
+write is refused when the person has never signed in to the register, was
+erased, is not yet a member (no role and no organisation), or would breach
+`incompatible_with`, and when the record is held by someone who accepted an
+invitation to it. Who may name a holder is who may write the record, within
+their scope. Invitations to a record that names nobody work as before, and
+one naming a holder takes none. The holding is listed with `"named": true`
+(in `/api/v1/me`, the person's appointments and the members listing), and
+`DELETE …/holder` refuses it: amend the record instead. The property must be
+none of the natural key, `role_property`, `ended_by` and `keys`.
 
 **Scopes.** When the acting role is held by appointment, a scope compares
 the record against the values of `keys` on the person's current

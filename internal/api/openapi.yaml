@@ -137,6 +137,9 @@ paths:
     delete:
       tags: [Membership]
       summary: Unbind whoever holds an appointment record, before the record ends
+      description: >-
+        Refused for a record that names its holder itself (its pack's holder_property):
+        amend the record to end that holding.
       parameters:
         - { name: class, in: path, required: true, schema: { type: string } }
         - { name: key, in: path, required: true, schema: { type: string } }
