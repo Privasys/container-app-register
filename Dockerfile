@@ -7,6 +7,21 @@
 # provenance-free on purpose: an OCI attestation index would change the
 # manifest digest the enclave pins at OID 1.3.6.1.4.1.65230.3.2.
 
+# Two images come out of this file, under the same version:
+#
+#   engine    ghcr.io/privasys/register: the register and its verifier,
+#             nothing else. Adopters build FROM it and add their own pack,
+#             manifest and site, so their measured image carries nothing
+#             they do not use.
+#   showcase  ghcr.io/privasys/container-app-register: the engine with the
+#             reference pack, its manifest and the console. The default
+#             target, so a plain `docker build .` builds it.
+#
+# ENGINE names the image the showcase is built on. Left alone it is the
+# engine stage of this build; the release sets it to the published engine
+# by digest, so the showcase is FROM exactly the engine adopters get.
+ARG ENGINE=engine
+
 # The console is built first and copied in as static files: it is part of
 # the measured image, so the page a person runs is code a verifier can
 # read, and no unattested web server ever gets to serve it.
@@ -42,7 +57,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
 
 # The register talks outward only to the identity provider's published
 # key set, over HTTPS, so it needs a trust store and nothing else.
-FROM alpine:3.21
+FROM alpine:3.21 AS engine
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /out/register /usr/local/bin/register
@@ -50,6 +65,22 @@ COPY --from=builder /out/register /usr/local/bin/register
 # can hand someone a binary that checks the register's evidence without
 # trusting the register.
 COPY --from=builder /out/register-verify /usr/local/bin/register-verify
+
+# Everything stays behind the configure gate until the attested configure
+# call succeeds: the engine's own contract, so the engine carries it.
+LABEL org.privasys.config_api="POST /configure"
+LABEL org.opencontainers.image.source="https://github.com/Privasys/container-app-register"
+LABEL org.opencontainers.image.title="Privasys Register engine"
+LABEL org.opencontainers.image.description="The register engine: build FROM it with your own pack, manifest and site"
+
+# No fixed port and no EXPOSE: the platform runs containers on the host
+# network and injects a unique $PORT per app, which the register binds.
+# A hard-coded port would collide with a co-located app and fail the
+# readiness probe.
+ENTRYPOINT ["/usr/local/bin/register"]
+
+# The showcase: the engine with the reference pack and the console.
+FROM ${ENGINE} AS showcase
 
 # The app manifest. CI also embeds it as the org.privasys.manifest OCI
 # label; the file serves GET /privasys.json for runtime introspection.
@@ -64,21 +95,11 @@ COPY packs /packs
 # console moves to /console.
 COPY --from=ui /src/ui/dist /web
 
-# Everything stays behind the configure gate until the attested configure
-# call succeeds.
-LABEL org.privasys.config_api="POST /configure"
 # The browser shell (public, measured code, no data) loads in the clear so
 # a sealed session can be established; "/" covers the root document only,
 # and /api is always sealed whatever is declared here. The label is
 # measured, so a verifier reads off the image exactly which paths this
 # register answers without a sealed session.
 LABEL org.privasys.static-unsealed-prefixes="/,/app-config.js,/assets/,/vendor/,/brand/,/favicon.svg,/openapi.yaml"
-LABEL org.opencontainers.image.source="https://github.com/Privasys/container-app-register"
 LABEL org.opencontainers.image.title="Privasys Register"
 LABEL org.opencontainers.image.description="A schema-driven, tamper-evident register of records"
-
-# No fixed port and no EXPOSE: the platform runs containers on the host
-# network and injects a unique $PORT per app, which the register binds.
-# A hard-coded port would collide with a co-located app and fail the
-# readiness probe.
-ENTRYPOINT ["/usr/local/bin/register"]

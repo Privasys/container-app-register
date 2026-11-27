@@ -271,9 +271,46 @@ it — flips the answer, substitutes the root, rewrites the row, forges
 the signature, detaches the anchor, truncates the proof — and requires
 the page to catch each one, naming which check failed and why.
 
+## Two images
+
+Each release publishes two images under the same version:
+
+| Image | Holds |
+|---|---|
+| `ghcr.io/privasys/register` | The engine: `register` and `register-verify`, a trust store and time zones. No pack, no console, no manifest. |
+| `ghcr.io/privasys/container-app-register` | The showcase: built `FROM` that engine, by digest, with the reference pack, its `privasys.json` and the console at `/web`. |
+
+Build an adopter image `FROM ghcr.io/privasys/register@sha256:…` so the
+measured image holds nothing you do not use. The engine carries one label,
+`org.privasys.config_api="POST /configure"`; the image built on it brings
+the rest:
+
+- **A pack**, baked at `/packs/<name>/pack.json` and named by `pack_ref`,
+  or delivered inline as `pack` in the configure call.
+- **A manifest**: its own `privasys.json`, embedded as the
+  `org.privasys.manifest` label. Its `surfaces.static` lists the paths that
+  load without a sealed session (your site's pages and assets); a register
+  whose pack asks for step-up approvals also lists `/.well-known/privasys/`
+  there and declares `POST /api/v1/step-up/answer` under `surfaces.public`.
+- **A site**, at `/site` (see [Adopter site](#adopter-site)), or nothing:
+  without one, the root answers with a short JSON description of the
+  register, and the API is all there is.
+
+The console is not in the engine. With no `/web`, its path answers 404
+("no console in this build") and nothing else changes. A site that serves
+the console, or loads the vendored sign-in client from `/vendor/`, copies
+it from the showcase of the same version:
+
+```dockerfile
+FROM ghcr.io/privasys/register@sha256:…
+COPY --from=ghcr.io/privasys/container-app-register@sha256:… /web /web
+COPY packs /packs
+COPY site /site
+```
+
 ## Adopter site
 
-An image built on the register (`FROM` this image) can put its own
+An image built on the register (`FROM` the engine image, or this one) can put its own
 front door in front of it: public pages rendered from templates at the
 root, single-page shells under prefixes of its choosing, and the static
 files they need. The register's own console moves to `/console`. The

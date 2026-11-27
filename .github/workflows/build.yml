@@ -26,6 +26,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE: ghcr.io/privasys/container-app-register
+  ENGINE_IMAGE: ghcr.io/privasys/register
   # The SQL engine's regular expressions in pure Go: no C library in the build.
   GOFLAGS: -tags=gms_pure_go
 
@@ -60,6 +61,32 @@ jobs:
       # on it. An image that ignores $PORT can never ship.
       - name: Build the image
         run: docker build -t register-smoke .
+
+      # The engine adopters build on: the two binaries and nothing of the
+      # showcase. It serves on $PORT, says what it is at the root, and takes
+      # a pack delivered inline.
+      - name: The engine image carries the engine alone, and runs
+        run: |
+          set -euo pipefail
+          docker build --target engine -t register-engine .
+          docker run --rm --entrypoint sh register-engine -c \
+            'test -x /usr/local/bin/register && test -x /usr/local/bin/register-verify && ! test -e /web && ! test -e /packs && ! test -e /privasys.json'
+          test "$(docker inspect -f '{{ index .Config.Labels "org.privasys.config_api" }}' register-engine)" = "POST /configure"
+          test -z "$(docker inspect -f '{{ index .Config.Labels "org.privasys.static-unsealed-prefixes" }}' register-engine)"
+          PORT=18090
+          docker run -d --name register-engine -e PORT=$PORT -e REGISTER_DATA_DIR=/data -e REGISTER_DEV_AUTH=1 \
+            -p $PORT:$PORT register-engine
+          ok=0
+          for _ in $(seq 1 20); do
+            if curl -fs "http://localhost:$PORT/health" | grep -q '"status"'; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != "1" ]; then docker logs register-engine || true; exit 1; fi
+          curl -fsS "http://localhost:$PORT/" | jq -e '.api == "/api/v1/status"' > /dev/null
+          jq -n --slurpfile pack packs/car-register/pack.json '{tenant: "gov", pack: $pack[0]}' |
+            curl -fsS -X POST "http://localhost:$PORT/configure" -H 'Content-Type: application/json' -d @- > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/readiness")" = 200
+          docker rm -f register-engine > /dev/null
 
       - name: Serve on the injected $PORT, configure, then read back
         run: |
@@ -256,15 +283,32 @@ jobs:
         id: manifest
         run: echo "json=$(jq -c . privasys.json | base64 -w0)" >> "$GITHUB_OUTPUT"
 
-      - id: build
+      # The engine first: adopters build FROM it.
+      - id: engine
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: engine
           push: true
           platforms: linux/amd64
           provenance: false
           sbom: false
           build-args: VERSION=${{ steps.tag.outputs.tag }}
+          tags: ${{ env.ENGINE_IMAGE }}:${{ steps.tag.outputs.tag }}
+
+      # The showcase is FROM the engine just published, by digest.
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: showcase
+          push: true
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+          build-args: |
+            VERSION=${{ steps.tag.outputs.tag }}
+            ENGINE=${{ env.ENGINE_IMAGE }}@${{ steps.engine.outputs.digest }}
           tags: ${{ env.IMAGE }}:${{ steps.tag.outputs.tag }}
           labels: org.privasys.manifest=${{ steps.manifest.outputs.json }}
 
@@ -272,6 +316,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DIGEST: ${{ steps.build.outputs.digest }}
+          ENGINE_DIGEST: ${{ steps.engine.outputs.digest }}
           TAG: ${{ steps.tag.outputs.tag }}
           SHA: ${{ github.sha }}
         run: |
@@ -284,11 +329,17 @@ jobs:
           | **Attestation OID** | \`1.3.6.1.4.1.65230.3.2\` |
           | **Pinned reference** | \`${IMAGE}@${DIGEST}\` |
           | **Source commit** | \`${SHA}\` |
+          | **Engine image digest** | \`${ENGINE_DIGEST}\` |
+          | **Engine reference** | \`${ENGINE_IMAGE}@${ENGINE_DIGEST}\` |
 
           The workload image digest is the SHA-256 manifest digest of the published
           container image. The enclave measures it into the RA-TLS leaf certificate
           at OID **1.3.6.1.4.1.65230.3.2**, so a client verifies which build served
           its request by inspecting the quote in the server certificate.
+
+          The engine image carries the register and its verifier only, for images
+          built FROM it with their own pack, manifest and site. The showcase above
+          is built FROM that engine, by digest.
 
           This build additionally publishes two extensions on the per-container leaf:
           **1.3.6.1.4.1.65230.5.4.1**, SHA-256 over the commitment key the deployer
@@ -307,5 +358,6 @@ jobs:
             echo
             echo '```'
             echo "${IMAGE}@${{ steps.build.outputs.digest }}"
+            echo "${ENGINE_IMAGE}@${{ steps.engine.outputs.digest }}"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
