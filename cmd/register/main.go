@@ -356,9 +356,9 @@ func (a *application) verifier() (auth.Verifier, error) {
 		return auth.DevVerifier{}, nil
 	}
 	if a.cfg.Audience == "" {
-		a.log.Warn("no audience configured: tokens from any audience this issuer signs will be accepted",
-			"issuer", a.cfg.Issuer)
+		return nil, errors.New("configuration: no audience for bearer tokens")
 	}
+	a.log.Info("bearer tokens", "issuer", a.cfg.Issuer, "audience", a.cfg.Audience)
 	return auth.NewJWKSVerifier(a.cfg.Issuer, a.cfg.Audience), nil
 }
 

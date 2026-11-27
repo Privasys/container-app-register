@@ -94,8 +94,8 @@ type JWKSVerifier struct {
 	fetchedAt time.Time
 }
 
-// NewJWKSVerifier returns a verifier for tokens issued by issuer. An
-// empty audience skips the audience check.
+// NewJWKSVerifier returns a verifier for tokens issued by issuer for
+// audience. An empty audience accepts no token.
 func NewJWKSVerifier(issuer, audience string) *JWKSVerifier {
 	return &JWKSVerifier{
 		issuer:   strings.TrimRight(issuer, "/"),
@@ -105,11 +105,26 @@ func NewJWKSVerifier(issuer, audience string) *JWKSVerifier {
 	}
 }
 
-// Verify checks signature, issuer, audience and expiry.
+// accessTokenTyp marks an access token: the identity provider writes it as
+// the typ claim, and its other statements (approvals, proofs, ID tokens)
+// never carry it.
+const accessTokenTyp = "at+jwt"
+
+// Verify checks signature, issuer, audience and expiry, and that the token
+// is an access token: a JOSE typ, when there is one, of JWT or at+jwt, and
+// the typ claim at+jwt.
 func (v *JWKSVerifier) Verify(ctx context.Context, token string) (*Identity, error) {
-	_, _, claims, err := v.verifyJWT(ctx, token)
+	typ, _, claims, err := v.verifyJWT(ctx, token)
 	if err != nil {
 		return nil, err
+	}
+	switch strings.ToLower(typ) {
+	case "", "jwt", accessTokenTyp:
+	default:
+		return nil, fmt.Errorf("auth: a %q token is not an access token", typ)
+	}
+	if t, _ := claims["typ"].(string); t != accessTokenTyp {
+		return nil, errors.New("auth: not an access token")
 	}
 	id := &Identity{Issuer: v.issuer, Roles: rolesClaim(claims), Claims: claims}
 	id.Sub, _ = claims["sub"].(string)
@@ -165,10 +180,17 @@ func (v *JWKSVerifier) verifyJWT(ctx context.Context, token string) (typ, alg st
 	if iss, _ := claims["iss"].(string); iss != v.issuer {
 		return "", "", nil, fmt.Errorf("auth: issuer %q is not %q", iss, v.issuer)
 	}
-	if v.audience != "" && !audienceMatches(claims, v.audience) {
+	if v.audience == "" {
+		return "", "", nil, errors.New("auth: no audience to check the token against")
+	}
+	if !audienceMatches(claims, v.audience) {
 		return "", "", nil, fmt.Errorf("auth: token is not for audience %q", v.audience)
 	}
-	if exp, ok := claims["exp"].(float64); ok && time.Now().Unix() > int64(exp) {
+	exp, ok := claims["exp"].(float64)
+	if !ok {
+		return "", "", nil, errors.New("auth: token has no expiry")
+	}
+	if time.Now().Unix() > int64(exp) {
 		return "", "", nil, errors.New("auth: token expired")
 	}
 	return header.Typ, header.Alg, claims, nil
